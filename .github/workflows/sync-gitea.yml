@@ -1,0 +1,31 @@
+name: Sync main to Gitea
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-gitea-main
+  cancel-in-progress: false
+
+jobs:
+  sync-main:
+    if: ${{ github.server_url == 'https://github.com' && github.repository == 'sc1994/Trading-Agents-Web' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the authoritative commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Push only HEAD to Gitea main and verify the SHA
+        env:
+          GITEA_MIRROR_SYNC_TOKEN: ${{ secrets.GITEA_MIRROR_SYNC_TOKEN }}
+        run: >-
+          bash scripts/sync_gitea_main.sh
+          https://gitea.suncheng.online:81/suncheng/Trading-Agents-Web.git
+          "${GITHUB_SHA}"
