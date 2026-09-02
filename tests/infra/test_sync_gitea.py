@@ -62,14 +62,18 @@ def test_script_pushes_main_and_rejects_non_fast_forward(tmp_path: Path) -> None
     run("bash", str(SCRIPT), remote, first, cwd=source)
     assert git(source, "ls-remote", remote, "refs/heads/main").split()[0] == first
 
+    second = commit(source, "second", "second")
+    run("bash", str(SCRIPT), remote, second, cwd=source)
+    assert git(source, "ls-remote", remote, "refs/heads/main").split()[0] == second
+
     run("git", "clone", "--branch", "main", remote, str(other), cwd=tmp_path)
     git(other, "config", "user.name", "Infra Test")
     git(other, "config", "user.email", "infra-test@example.invalid")
     divergent = commit(other, "target divergence", "target")
     git(other, "push", "origin", "HEAD:main")
 
-    second = commit(source, "source divergence", "source")
-    result = run("bash", str(SCRIPT), remote, second, cwd=source, check=False)
+    third = commit(source, "source divergence", "source")
+    result = run("bash", str(SCRIPT), remote, third, cwd=source, check=False)
     assert result.returncode != 0
     assert git(source, "ls-remote", remote, "refs/heads/main").split()[0] == divergent
 
