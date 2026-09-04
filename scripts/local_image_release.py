@@ -204,6 +204,10 @@ def publish(
                     "immutable SHA tag appeared with a different image ID; refusing overwrite"
                 )
         else:
+            # v1.1.0 accepts only the narrow race where another process
+            # publishes this same full SHA after this second check and before
+            # this tag write; a later write may point to a different image ID.
+            # This does not permit sequential overwrites or relax later guards.
             docker.call(["image", "tag", candidate, immutable])
 
         docker.call(["image", "tag", immutable, stable])
