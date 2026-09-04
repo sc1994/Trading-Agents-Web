@@ -32,15 +32,19 @@ def test_smoke_failure_never_tags_full_sha_or_stable() -> None:
         revision=SHA,
         managed=True,
     )
-    docker.exists.side_effect = [False, False]
+    docker.exists.side_effect = [False, True]
     docker.call.side_effect = [
         completed(),
         subprocess.CalledProcessError(1, ["docker", "run"]),
+        completed(),
     ]
     with pytest.raises(subprocess.CalledProcessError):
         release.publish(docker, SHA, "trading-agents-web", 3, Path("."), pid=7)
     calls = [call.args[0] for call in docker.call.call_args_list]
     assert not any(args[:2] == ["image", "tag"] for args in calls)
+    assert ["image", "rm", f"trading-agents-web:candidate-{SHA}-7"] in calls
+    docker.list_managed_sha_images.assert_not_called()
+    docker.remove_image.assert_not_called()
 
 
 def test_publish_smokes_offline_before_updating_stable() -> None:
@@ -108,7 +112,7 @@ def test_conflicting_immutable_sha_is_rejected_before_docker_mutation() -> None:
     assert docker.call.call_count == 0
 
 
-def test_racing_immutable_tag_with_different_id_is_never_overwritten() -> None:
+def test_observed_different_image_at_final_check_is_rejected() -> None:
     docker = Mock()
     candidate = release.ImageInfo(
         id="sha256:candidate",
@@ -122,7 +126,7 @@ def test_racing_immutable_tag_with_different_id_is_never_overwritten() -> None:
         revision=SHA,
         managed=True,
     )
-    docker.exists.side_effect = [False, True, False]
+    docker.exists.side_effect = [False, True, True]
     docker.inspect.side_effect = [candidate, existing]
     docker.call.return_value = completed()
     with pytest.raises(RuntimeError, match="different image ID"):
@@ -138,6 +142,9 @@ def test_racing_immutable_tag_with_different_id_is_never_overwritten() -> None:
         for args in calls
     )
     assert not any(args[-1:] == ["trading-agents-web:local-stable"] for args in calls)
+    assert ["image", "rm", f"trading-agents-web:candidate-{SHA}-7"] in calls
+    docker.list_managed_sha_images.assert_not_called()
+    docker.remove_image.assert_not_called()
 
 
 def test_cleanup_counts_rolled_back_stable_among_three_and_skips_in_use() -> None:
