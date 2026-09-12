@@ -1,0 +1,33 @@
+name: Deploy blank web page locally
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: trading-agents-web-local-web
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: >-
+      ${{ (github.server_url == 'http://suncheng.online:14200' ||
+      github.server_url == 'http://192.168.31.2:14200') &&
+      github.repository == 'suncheng/Trading-Agents-Web' &&
+      github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the Gitea main commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Build, start, and verify the local web service
+        env:
+          TRADINGAGENTS_WEB_PORT: "8080"
+        run: bash scripts/deploy_local_web.sh
