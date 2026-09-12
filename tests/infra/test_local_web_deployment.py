@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[2]
 COMPOSE = ROOT / "docker-compose.web.yml"
 DEPLOY_SCRIPT = ROOT / "scripts/deploy_local_web.sh"
 WORKFLOW = ROOT / ".gitea/workflows/deploy-local-web.yml"
+CI_WORKFLOW = ROOT / ".github/workflows/ci.yml"
 PINNED_ACTION = re.compile(r"^[^@]+@[0-9a-f]{40}$")
 
 
@@ -40,8 +41,11 @@ def test_gitea_workflow_only_deploys_protected_main() -> None:
     }
 
     job = document["jobs"]["deploy"]
-    assert "github.server_url == 'https://gitea.suncheng.online:81'" in job["if"]
-    assert "github.repository == 'suncheng/Trading-Agents-Web'" in job["if"]
+    condition = job["if"]
+    assert "github.server_url == 'http://suncheng.online:14200'" in condition
+    assert "github.server_url == 'http://192.168.31.2:14200'" in condition
+    assert "https://gitea.suncheng.online:81" not in condition
+    assert "github.repository == 'suncheng/Trading-Agents-Web'" in condition
     assert "github.ref == 'refs/heads/main'" in job["if"]
     assert job["runs-on"] == "ubuntu-latest"
     for step in job["steps"]:
@@ -54,6 +58,13 @@ def test_gitea_workflow_only_deploys_protected_main() -> None:
     assert "GITEA_MIRROR_SYNC_TOKEN" not in text
     assert "OPENAI_API_KEY" not in text
     assert "ALPHA_VANTAGE_API_KEY" not in text
+
+
+def test_ci_test_job_fetches_full_history_for_provenance() -> None:
+    document = load_yaml(CI_WORKFLOW)
+    checkout = document["jobs"]["test"]["steps"][0]
+    assert checkout["uses"] == "actions/checkout@v4"
+    assert checkout["with"]["fetch-depth"] == "0"
 
 
 def test_deploy_script_rebuilds_and_verifies_the_local_service() -> None:
