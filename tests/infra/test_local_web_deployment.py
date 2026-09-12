@@ -22,7 +22,8 @@ def test_web_compose_isolated_from_runtime_secrets() -> None:
     assert service["build"]["context"] == "."
     assert service["build"]["dockerfile"] == "web/Dockerfile"
     assert service["image"] == "trading-agents-web-ui:local"
-    assert service["ports"] == ["${TRADINGAGENTS_WEB_PORT:-8080}:8080"]
+    assert service["ports"] == ["127.0.0.1:${TRADINGAGENTS_WEB_PORT:-8080}:8080"]
+    assert all(mapping.startswith("127.0.0.1:") for mapping in service["ports"])
     assert "env_file" not in service
     assert "/healthz" in " ".join(service["healthcheck"]["test"])
 
