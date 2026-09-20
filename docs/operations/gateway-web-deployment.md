@@ -107,34 +107,38 @@ Gitea 管理界面确认它处于在线状态，标签集合仍包含
 
 ## 阶段 3：一次性初始化 Gitea `main`
 
-只在阶段 0 至阶段 2 均完成后执行。先再次读取两个远端状态；这里重新解析变量并立即校验，避免预检后的漂移。
-
-```bash
-set -euo pipefail
-
-readonly GITHUB_REMOTE='https://github.com/sc1994/Trading-Agents-Web.git'
-readonly GITEA_REMOTE='https://gitea.suncheng.online:81/suncheng/Trading-Agents-Web.git'
-readonly EXPECTED_OLD_SHA='052251b1a133a3aef9506b864c30d96c628c45be'
-
-DEPLOY_SHA="$(git rev-parse HEAD)"
-GITHUB_MAIN_SHA="$(git ls-remote "$GITHUB_REMOTE" refs/heads/main | awk 'NR == 1 { print $1 }')"
-GITEA_MAIN_SHA="$(git ls-remote "$GITEA_REMOTE" refs/heads/main | awk 'NR == 1 { print $1 }')"
-printf 'local=%s\ngithub-main=%s\ngitea-main-before-init=%s\n' \
-  "$DEPLOY_SHA" "$GITHUB_MAIN_SHA" "$GITEA_MAIN_SHA"
-
-test "$DEPLOY_SHA" = "$GITHUB_MAIN_SHA"
-test "$GITEA_MAIN_SHA" = "$EXPECTED_OLD_SHA"
-```
-
-若旧 SHA、GitHub `main` 或本地 HEAD 有任何差异，停止并联系 Multica 小队成员。不要重试初始化，不要改变 ref，也不要把发现的远端状态当成新的期望值。
-
-在同一干净 checkout 的受控子 shell 中安全注入 token。输入不会回显，token 只存在于该子 shell 和初始化脚本的临时 askpass 环境中。不要使用预先导出的 token，也不要把 token 传给命令行参数。
+只在阶段 0 至阶段 2 均完成后执行。以下单一受控子 shell 在远端写入前 fresh fetch
+GitHub `main`，重新读取 GitHub 与 Gitea，固定唯一的 `DEPLOY_SHA`，并再次验证 Gitea
+仍是固定旧根。它不会沿用任何前一代码块中的变量。若 checkout 或任一远端在此期间漂移，
+命令会在读取 token 或写入前失败。
 
 ```bash
 (
-  set -euo pipefail
+  set -Eeuo pipefail
+  readonly GITHUB_REMOTE='https://github.com/sc1994/Trading-Agents-Web.git'
   readonly GITEA_REMOTE='https://gitea.suncheng.online:81/suncheng/Trading-Agents-Web.git'
+  readonly EXPECTED_OLD_SHA='052251b1a133a3aef9506b864c30d96c628c45be'
+  readonly FRESH_MAIN_REF="refs/gateway-web-preflight/main-$$"
+
+  cleanup() {
+    git update-ref -d "$FRESH_MAIN_REF" >/dev/null 2>&1 || true
+    unset GITEA_MIRROR_SYNC_TOKEN
+  }
+  trap cleanup EXIT INT TERM
+
+  test -z "$(git status --porcelain)"
+  git fetch --no-tags "$GITHUB_REMOTE" refs/heads/main:"$FRESH_MAIN_REF"
   DEPLOY_SHA="$(git rev-parse HEAD)"
+  readonly DEPLOY_SHA
+  FETCHED_GITHUB_MAIN_SHA="$(git rev-parse "$FRESH_MAIN_REF")"
+  GITHUB_MAIN_SHA="$(git ls-remote "$GITHUB_REMOTE" refs/heads/main | awk 'NR == 1 { print $1 }')"
+  GITEA_MAIN_SHA="$(git ls-remote "$GITEA_REMOTE" refs/heads/main | awk 'NR == 1 { print $1 }')"
+  printf 'local=%s\ngithub-main-fetched=%s\ngithub-main-remote=%s\ngitea-main-before-init=%s\n' \
+    "$DEPLOY_SHA" "$FETCHED_GITHUB_MAIN_SHA" "$GITHUB_MAIN_SHA" "$GITEA_MAIN_SHA"
+
+  test "$DEPLOY_SHA" = "$FETCHED_GITHUB_MAIN_SHA"
+  test "$DEPLOY_SHA" = "$GITHUB_MAIN_SHA"
+  test "$GITEA_MAIN_SHA" = "$EXPECTED_OLD_SHA"
 
   test -z "${GITEA_MIRROR_SYNC_TOKEN:-}"
   IFS= read -r -s -p 'Gitea sync token: ' GITEA_MIRROR_SYNC_TOKEN
@@ -146,7 +150,9 @@ test "$GITEA_MAIN_SHA" = "$EXPECTED_OLD_SHA"
 )
 ```
 
-子 shell 非零退出即停止并联系 Multica 小队成员。不要打印环境、打开 shell tracing、复制终端回滚内容，或以其他方式重试写入。
+子 shell 非零退出即停止并联系 Multica 小队成员。输入不会回显，token 只存在于该子
+shell 和初始化脚本的临时 askpass 环境中；不要使用预先导出的 token，也不要把 token
+传给命令行参数。不要打印环境、打开 shell tracing、复制终端回滚内容，或以其他方式重试写入。
 
 ## 阶段 4：验证初始化结果和首次工作流
 
@@ -176,7 +182,11 @@ test "$GITEA_MAIN_SHA" = "$DEPLOY_SHA"
 
 - 工作流目标提交精确等于 `DEPLOY_SHA`；
 - 执行 Runner 是 `gitea-runner-gatway`，并具有 `gateway` 标签；
-- 工作流成功，且日志显示候选检查在 Compose 切换前完成；
+- 对该 `DEPLOY_SHA` 已审版本的 `scripts/deploy_gateway_web.sh` 核对固定顺序：端口
+  所有者检查、候选镜像和 revision 检查、隔离候选容器的精确健康/页面检查、候选删除，
+  然后才是 Compose 切换和本机回环检查；切换后失败由脚本恢复旧镜像，首次失败则停止服务；
+- 工作流成功，证明上述 fail-fast 脚本检查全部通过；不要要求工作流日志输出不存在的
+  “候选先于切换”阶段标记；
 - 工作流没有读取同步 token 或应用密钥。
 
 若工作流排队未被该 Runner 接收、失败、目标 SHA 不同，或无法确认任一项，停止并联系 Multica 小队成员。失败调查仅收集该工作流和本服务的只读证据；不得手工启动历史 Stack、修改 Nginx Proxy Manager、删除镜像或操作无关容器。
