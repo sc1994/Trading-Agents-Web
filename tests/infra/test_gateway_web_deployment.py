@@ -1,4 +1,5 @@
 import json
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,6 +11,9 @@ ROOT = Path(__file__).resolve().parents[2]
 COMPOSE = ROOT / "docker-compose.gateway-web.yml"
 SCRIPT = ROOT / "scripts/deploy_gateway_web.sh"
 INDEX = ROOT / "web/index.html"
+GITEA_WORKFLOW = ROOT / ".gitea/workflows/deploy-gateway-web.yml"
+CI_WORKFLOW = ROOT / ".github/workflows/ci.yml"
+PINNED_CHECKOUT = re.compile(r"actions/checkout@[0-9a-f]{40}")
 SHA = "a" * 40
 OLD_SHA = "b" * 40
 OLD_IMAGE = f"trading-agents-web-ui:{OLD_SHA}"
@@ -17,6 +21,168 @@ OLD_IMAGE = f"trading-agents-web-ui:{OLD_SHA}"
 
 def load_yaml(path: Path) -> dict[object, object]:
     return yaml.safe_load(path.read_text(encoding="utf-8"))
+
+
+def load_workflow(path: Path) -> dict[str, object]:
+    document = yaml.load(path.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+    assert isinstance(document, dict)
+    return document
+
+
+def workflow_command_data(node: object) -> list[object]:
+    selected: list[object] = []
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key in {"env", "with", "run"}:
+                selected.append(value)
+            selected.extend(workflow_command_data(value))
+    elif isinstance(node, list):
+        for value in node:
+            selected.extend(workflow_command_data(value))
+    return selected
+
+
+def test_gitea_workflow_is_restricted_to_gateway_main() -> None:
+    workflow = load_workflow(GITEA_WORKFLOW)
+
+    assert workflow["on"] == {
+        "push": {"branches": ["main"]},
+        "workflow_dispatch": "",
+    }
+    assert workflow["permissions"] == {"contents": "read"}
+    assert workflow["concurrency"] == {
+        "group": "trading-agents-web-gateway-deploy",
+        "cancel-in-progress": "false",
+    }
+    job = workflow["jobs"]["deploy"]
+    assert job["runs-on"] == "gateway"
+    condition = " ".join(job["if"].split())
+    assert condition == (
+        "${{ (github.server_url == 'http://suncheng.online:14200' || "
+        "github.server_url == 'http://192.168.31.2:14200') && "
+        "github.repository == 'suncheng/Trading-Agents-Web' && "
+        "github.ref == 'refs/heads/main' }}"
+    )
+
+
+def test_gitea_workflow_pins_checkout_and_exposes_no_secrets() -> None:
+    workflow = load_workflow(GITEA_WORKFLOW)
+    checkout = workflow["jobs"]["deploy"]["steps"][0]
+
+    assert PINNED_CHECKOUT.fullmatch(checkout["uses"])
+    assert checkout["uses"] == (
+        "actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683"
+    )
+    assert checkout["with"] == {
+        "ref": "${{ github.sha }}",
+        "fetch-depth": "1",
+        "persist-credentials": "false",
+    }
+    command_data = json.dumps(workflow_command_data(workflow), sort_keys=True)
+    for forbidden in (
+        "GITEA_MIRROR_SYNC_TOKEN",
+        "OPENAI_API_KEY",
+        "ALPHA_VANTAGE_API_KEY",
+    ):
+        assert forbidden not in command_data
+
+
+def test_gitea_workflow_deploys_only_the_checked_out_full_sha() -> None:
+    workflow = load_workflow(GITEA_WORKFLOW)
+    deploy = workflow["jobs"]["deploy"]["steps"][1]
+
+    assert deploy["env"] == {"DEPLOY_SHA": "${{ github.sha }}"}
+    run = deploy["run"]
+    assert run.startswith("set -Eeuo pipefail\n")
+    assert "*[!0-9a-f]*|'') exit 2" in run
+    assert 'test "${#DEPLOY_SHA}" -eq 40' in run
+    assert 'test "$(git rev-parse HEAD)" = "$DEPLOY_SHA"' in run
+    assert 'bash scripts/deploy_gateway_web.sh "$DEPLOY_SHA"' in run
+
+
+def gateway_ci_job() -> dict[str, object]:
+    workflow = load_workflow(CI_WORKFLOW)
+    return workflow["jobs"]["gateway-web-image"]
+
+
+def test_github_ci_builds_gateway_web_image_from_the_checked_out_sha() -> None:
+    job = gateway_ci_job()
+    checkout = job["steps"][0]
+    verify = job["steps"][1]
+    run = verify["run"]
+
+    assert job["runs-on"] == "ubuntu-latest"
+    assert PINNED_CHECKOUT.fullmatch(checkout["uses"])
+    assert checkout["uses"] == (
+        "actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683"
+    )
+    assert checkout["with"] == {
+        "ref": "${{ github.sha }}",
+        "fetch-depth": "1",
+        "persist-credentials": "false",
+    }
+    assert verify["env"] == {
+        "IMAGE_REF": "trading-agents-web-ui:${{ github.sha }}"
+    }
+    assert "docker build" in run
+    assert '--label "org.opencontainers.image.revision=${GITHUB_SHA}"' in run
+    assert '--tag "$IMAGE_REF"' in run
+    assert "--file web/Dockerfile" in run
+    assert "--privileged" not in run
+
+
+def test_github_ci_inspects_revision_and_rejects_a_root_image_user() -> None:
+    run = gateway_ci_job()["steps"][1]["run"]
+
+    assert "docker image inspect" in run
+    assert 'index .Config.Labels "org.opencontainers.image.revision"' in run
+    assert 'test "$built_revision" = "$GITHUB_SHA"' in run
+    assert ".Config.User" in run
+    assert 'case "$image_user" in' in run
+    assert "0:*" in run
+    assert "root:*" in run
+
+
+def test_github_ci_runs_the_candidate_with_production_security_constraints() -> None:
+    run = gateway_ci_job()["steps"][1]["run"]
+
+    for option in (
+        "--read-only",
+        "--cap-drop ALL",
+        "--security-opt no-new-privileges",
+        "--tmpfs /tmp:rw,noexec,nosuid,size=16m",
+        "--publish 127.0.0.1::8080",
+    ):
+        assert option in run
+    assert 'docker port "$candidate_name" 8080/tcp' in run
+    assert '"${candidate_url}/healthz"' in run
+    assert '"${candidate_url}/"' in run
+    assert 'cmp -s "$health_response" "$health_expected"' in run
+    assert 'cmp -s "$page_response" web/index.html' in run
+
+
+def test_github_ci_candidate_check_is_bounded_and_always_cleaned_up() -> None:
+    verify = gateway_ci_job()["steps"][1]
+    run = verify["run"]
+
+    assert verify["timeout-minutes"] == "10"
+    assert "trap cleanup EXIT INT TERM" in run
+    assert 'docker rm --force "$candidate_name"' in run
+    assert "for attempt in {1..30}" in run
+    assert "--connect-timeout 2" in run
+    assert "--max-time 5" in run
+    assert "while true" not in run
+
+
+def test_github_ci_validates_compose_with_the_built_image_and_revision() -> None:
+    run = gateway_ci_job()["steps"][1]["run"]
+
+    assert 'TRADINGAGENTS_WEB_IMAGE="$IMAGE_REF"' in run
+    assert 'TRADINGAGENTS_WEB_REVISION="$GITHUB_SHA"' in run
+    assert (
+        "docker compose --file docker-compose.gateway-web.yml config --quiet"
+        in run
+    )
 
 
 def test_compose_binds_only_fixed_loopback_port_and_has_no_secrets() -> None:
