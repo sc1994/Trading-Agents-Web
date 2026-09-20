@@ -1,249 +1,217 @@
-# Gitea Gateway Web Deployment Design
+# Gitea 网关 Web 自动部署设计
 
-## Context
+## 背景
 
-`sc1994/Trading-Agents-Web` is authoritative on GitHub. The repository
-currently contains a CLI application and does not expose a long-running HTTP
-service. The first deployed web surface is intentionally an empty HTML page;
-its purpose is to establish a tested, auditable build-and-deploy path before
-product web features exist.
+GitHub 上的 `sc1994/Trading-Agents-Web` 是唯一权威代码源。仓库目前是
+CLI 应用，没有可长期运行的 HTTP 服务。第一版 Web 服务仅展示空白 HTML
+页面，目的是在真正开发 Web 产品功能前，先建立一条经过测试、可以审计的
+自动构建和部署链路。
 
-The gateway host is `billsys` (`192.168.31.2`). Its Gitea repository
-`suncheng/Trading-Agents-Web` currently has one unrelated root commit,
-`052251b1a133a3aef9506b864c30d96c628c45be`, whose tree contains only an empty
-`README.md`. It has no workflows and has recorded zero Actions runs, jobs, or
-schedules. GitHub `main` is therefore not yet synchronized to Gitea.
+网关机器是 `billsys`（`192.168.31.2`）。其 Gitea 仓库
+`suncheng/Trading-Agents-Web` 当前只有一个与 GitHub 无共同历史的根提交
+`052251b1a133a3aef9506b864c30d96c628c45be`，提交树中仅有一个空的
+`README.md`。该仓库没有工作流，Actions 运行、任务和计划数量均为零。因此，
+GitHub `main` 尚未同步到 Gitea。
 
-The gateway has a running Gitea Actions runner currently identified as
-`gitea-runner-gatway`. Nginx Proxy Manager already routes
-`trading.suncheng.online` to `127.0.0.1:7681`; that port is currently closed.
-Historical TradingAgents Dockge stacks and images exist on the host but are
-stopped and are not artifacts of this repository.
+网关上已有一台运行中的 Gitea Actions Runner，当前名称为
+`gitea-runner-gatway`。Nginx Proxy Manager 已将
+`trading.suncheng.online` 转发到 `127.0.0.1:7681`，该端口目前没有服务
+监听。主机上还保留着历史 TradingAgents Dockge Stack 和镜像，但它们已经
+停止，也不是当前仓库的构建产物。
 
-This design extends, and where necessary supersedes, the prior local-image-only
-design. It does not turn the TradingAgents CLI into a web application.
+本设计扩展并在必要处替代此前“只生成本地 CLI 镜像”的设计，但不会把
+TradingAgents CLI 改造成 Web 应用。
 
-## Goals
+## 目标
 
-- Keep GitHub `main` as the only authoritative source.
-- Make normal GitHub `main` pushes synchronize to Gitea `main` without force.
-- Use a gateway-specific Gitea runner label to build and deploy the web image.
-- Serve an empty HTML page at `trading.suncheng.online`.
-- Expose a dependency-free `/healthz` endpoint for deployment verification.
-- Bind the application only to `127.0.0.1:7681`; Nginx Proxy Manager remains
-  the external entry point.
-- Make every deployed image traceable to the exact Gitea/GitHub commit SHA.
-- Leave existing runtime secrets, TradingAgents data, historical stacks, and
-  unrelated containers untouched.
+- 保持 GitHub `main` 为唯一权威代码源。
+- 让 GitHub `main` 的常规更新通过非强制推送同步到 Gitea `main`。
+- 使用网关专用的 Gitea Runner 标签构建并部署 Web 镜像。
+- 通过 `trading.suncheng.online` 提供空白 HTML 页面。
+- 提供不依赖业务组件的 `/healthz` 健康检查端点。
+- 应用只绑定 `127.0.0.1:7681`，继续由 Nginx Proxy Manager 对外提供入口。
+- 每个已部署镜像都能追溯到精确的 Gitea/GitHub 提交 SHA。
+- 不影响现有运行密钥、TradingAgents 数据、历史 Stack 和无关容器。
 
-## Non-Goals
+## 非目标
 
-- No TradingAgents analysis form, HTTP API, authentication, or report viewer.
-- No LLM or market-data credentials in the web container or workflow.
-- No remote image registry, Kubernetes, blue-green platform, or automatic
-  rollback service.
-- No CI-managed Nginx Proxy Manager changes.
-- No deletion of historical TradingAgents images, volumes, or Dockge stacks.
-- No automatic repair of future Gitea divergence.
+- 不提供 TradingAgents 分析表单、HTTP API、身份认证或报告查看器。
+- Web 容器和工作流不读取 LLM 或行情数据凭据。
+- 不引入远程镜像仓库、Kubernetes、蓝绿部署平台或独立自动回滚服务。
+- CI 不修改 Nginx Proxy Manager 配置。
+- 不删除历史 TradingAgents 镜像、卷或 Dockge Stack。
+- 不自动覆盖或修复未来出现的 Gitea 分支漂移。
 
-## Considered Approaches
+## 方案比较
 
-### Repository-owned Gitea workflow on the gateway runner (selected)
+### 由仓库管理 Gitea 工作流并使用网关 Runner（采用）
 
-The repository contains the service, Compose definition, deployment script,
-tests, and Gitea workflow. A push to synchronized Gitea `main` dispatches only
-to a runner carrying the `gateway` label. This keeps the deployed behavior and
-its automation versioned together and produces direct commit-to-runtime
-traceability.
+仓库统一保存 Web 服务、Compose 配置、部署脚本、测试和 Gitea 工作流。
+同步后的 Gitea `main` 收到推送时，只向带有 `gateway` 标签的 Runner 派发
+部署任务。这样，运行内容与部署自动化可以一起版本化，并能直接从提交追踪到
+运行实例。
 
-### Manually managed Dockge stack
+### 使用 Dockge 手工维护 Stack
 
-Dockge would fit existing gateway operations, but repository updates would not
-naturally trigger a deployment and the checked-in deployment contract could
-drift from the host. It remains useful for unrelated historical stacks but is
-not the owner of this service.
+Dockge 符合网关现有运维方式，但仓库更新不能自然触发部署，主机配置也容易与
+仓库中的部署契约发生漂移。Dockge 继续管理其他历史 Stack，但不负责本服务。
 
-### Registry-based build and pull deployment
+### 构建后推送镜像仓库，再由网关拉取
 
-Building elsewhere and pulling an immutable registry image would separate
-build and runtime privileges. For a dependency-free empty page on a single
-host, the registry, credentials, retention, and pull orchestration add cost
-without a current operational benefit.
+这种方式能隔离构建与运行权限，但当前服务只是单机上的无依赖空白页。为此增加
+镜像仓库、凭据、保留策略和拉取编排，成本大于现阶段收益。
 
-## Architecture
+## 架构
 
-### Source synchronization
+### 代码同步
 
-GitHub Actions remains the only component allowed to update Gitea `main`.
-Normal synchronization uses a single non-force refspec,
-`HEAD:refs/heads/main`, followed by an exact SHA comparison.
+GitHub Actions 是唯一允许更新 Gitea `main` 的组件。完成初始化后，常规同步
+只使用单一非强制 refspec `HEAD:refs/heads/main`，随后精确比较两端 SHA。
 
-The current unrelated Gitea root prevents the first fast-forward. A one-time
-operator action performs these guarded steps:
+当前 Gitea 独立根提交会阻止首次快进推送。需要由运维人员执行一次受保护的
+初始化操作：
 
-1. Re-read Gitea `main` and require it to equal
-   `052251b1a133a3aef9506b864c30d96c628c45be`.
-2. Verify that commit has no parent and its tree contains only `README.md`.
-3. Create the annotated backup tag
-   `pre-github-sync-20260920-052251b1` at that exact commit.
-4. Verify the tag resolves to the expected commit.
-5. Replace only `refs/heads/main` using an explicit force-with-lease for the
-   known old SHA; do not use mirror push, wildcard refspecs, or ref deletion.
-6. Verify Gitea `main` exactly equals the checked-out GitHub `main` SHA.
+1. 重新读取 Gitea `main`，要求它精确等于
+   `052251b1a133a3aef9506b864c30d96c628c45be`。
+2. 验证该提交没有父提交，且提交树中只有 `README.md`。
+3. 在该提交上创建带说明的备份标签
+   `pre-github-sync-20260920-052251b1`。
+4. 验证备份标签能够解析回预期提交。
+5. 使用绑定精确旧 SHA 的 `force-with-lease`，只替换
+   `refs/heads/main`；禁止 mirror push、通配 refspec 和引用删除。
+6. 验证 Gitea `main` 与本次检出的 GitHub `main` 完整 SHA 完全一致。
 
-If any observed SHA or tree differs, the operation stops without changing
-Gitea. The initialization operation cannot accept an arbitrary old SHA. Once
-the fixed old root is no longer `main`, later divergence is reported rather
-than overwritten.
+任何已观察 SHA 或提交树不匹配时，初始化立即停止且不修改 Gitea。初始化入口
+不能接受任意旧 SHA。固定旧根提交离开 `main` 后，未来再出现分支漂移时只报告
+异常，不自动覆盖。
 
-### Web service
+### Web 服务
 
-`web/server.py` uses only the Python standard library. It serves the exact
-contents of `web/index.html` for `/` and `/index.html`, returns `ok\n` from
-`/healthz`, and returns 404 for unknown paths. The HTML page intentionally has
-no visible content.
+`web/server.py` 只使用 Python 标准库。它在 `/` 和 `/index.html` 返回
+`web/index.html` 的精确内容，在 `/healthz` 返回 `ok\n`，其他路径返回
+404。HTML 页面按需求保持无可见内容。
 
-`web/Dockerfile` uses Python 3.12 Alpine, runs as a non-root user, and embeds
-only the server and page. The Compose service:
+`web/Dockerfile` 使用 Python 3.12 Alpine，以非 root 用户运行，只包含服务器
+和页面文件。Compose 服务满足以下约束：
 
-- binds `127.0.0.1:7681` to container port `8080`;
-- uses `restart: unless-stopped`;
-- has a Docker health check against `/healthz`;
-- is read-only, drops all Linux capabilities, enables
-  `no-new-privileges`, and uses a small `tmpfs` for `/tmp`;
-- has no `env_file`, application secret, host data mount, or Docker socket.
+- 将主机 `127.0.0.1:7681` 映射到容器 `8080` 端口；
+- 使用 `restart: unless-stopped`；
+- 通过 `/healthz` 执行 Docker 健康检查；
+- 根文件系统只读，删除全部 Linux capabilities，启用
+  `no-new-privileges`，并为 `/tmp` 提供小容量 `tmpfs`；
+- 不使用 `env_file`，不读取应用密钥，不挂载宿主数据或 Docker socket。
 
-The Compose project name is fixed as `trading-agents-web`. The running image is
-`trading-agents-web-ui:<40-character commit SHA>`, and both image and container
-carry `org.opencontainers.image.revision=<SHA>` metadata.
+Compose 项目名固定为 `trading-agents-web`。运行镜像命名为
+`trading-agents-web-ui:<40 位提交 SHA>`，镜像与容器均携带
+`org.opencontainers.image.revision=<SHA>` 元数据。
 
-### Deployment workflow
+### 部署工作流
 
-`.gitea/workflows/deploy-gateway-web.yml` responds to `main` pushes and an
-explicit manual dispatch. The job:
+`.gitea/workflows/deploy-gateway-web.yml` 响应 `main` 推送和显式人工触发。
+部署任务满足以下约束：
 
-- validates the Gitea server URL, repository name, `refs/heads/main`, and a
-  lowercase 40-character commit SHA;
-- uses `runs-on: gateway`, never the generic `ubuntu-latest` label;
-- has only `contents: read` repository permission;
-- uses a pinned checkout action with credentials disabled after checkout;
-- passes the immutable checked-out SHA to `scripts/deploy_gateway_web.sh`;
-- uses a fixed concurrency group with `cancel-in-progress: false` so an older
-  deployment cannot overtake a newer one within this workflow.
+- 验证 Gitea 服务地址、仓库名、`refs/heads/main` 和 40 位小写提交 SHA；
+- 使用 `runs-on: gateway`，不得使用通用 `ubuntu-latest` 标签；
+- 仓库权限仅为 `contents: read`；
+- 使用固定完整 SHA 的 checkout action，并在检出后禁用凭据保留；
+- 将不可变的检出 SHA 传给 `scripts/deploy_gateway_web.sh`；
+- 使用固定 concurrency group 和 `cancel-in-progress: false`，防止本工作流中的
+  旧部署在新部署之后覆盖运行版本。
 
-The workflow never receives the GitHub-to-Gitea token or application API keys.
-It requires the runner's existing host Docker access; this remains
-host-root-equivalent and is restricted operationally by the dedicated runner
-label and workflow guards, not by Docker itself.
+工作流不读取 GitHub 到 Gitea 的同步 token，也不读取任何应用 API 密钥。它会
+使用 Runner 已有的宿主机 Docker 权限。该权限等同宿主机 root 控制面，实际约束
+来自专用 Runner 标签和工作流身份守卫，而不是 Docker 自身隔离。
 
-### Deployment script
+### 部署脚本
 
-The deployment script validates the SHA and fixed port, selects Docker Compose
-v2 (or the existing compatible `docker-compose` command), and performs:
+部署脚本验证提交 SHA 和固定端口，并选择 Docker Compose v2；如果环境只有兼容的
+`docker-compose` 命令则使用该命令。执行顺序如下：
 
-1. Build the SHA-tagged candidate image with revision metadata.
-2. Start a temporary candidate container without host data or secrets and
-   verify both `/healthz` and the exact blank page.
-3. Remove the temporary candidate container.
-4. Record the currently deployed image reference, if one exists.
-5. Reconcile the fixed Compose project to the candidate image.
-6. Verify Docker health plus `http://127.0.0.1:7681/healthz` and the exact page.
-7. On post-cutover verification failure, restore the recorded prior image when
-   available and report failure; on first deployment, leave the failed service
-   stopped.
+1. 构建带 revision 元数据的完整 SHA 候选镜像。
+2. 在不挂载宿主数据、不注入密钥的条件下启动临时候选容器，同时验证
+   `/healthz` 和空白页精确内容。
+3. 删除临时候选容器。
+4. 如果已有部署，记录当前镜像引用。
+5. 使用候选镜像更新固定 Compose 项目。
+6. 验证 Docker 健康状态、`http://127.0.0.1:7681/healthz` 和页面精确内容。
+7. 切换后验证失败时，如果存在旧镜像则恢复旧镜像并报告失败；首次部署失败时，
+   停止失败服务。
 
-A build or candidate-smoke failure does not touch the running service. The
-script does not prune images or change Nginx Proxy Manager. Old images remain
-available for manual diagnosis and rollback; retention can be added when image
-growth becomes material.
+构建或候选检查失败不会影响当前运行服务。脚本不清理镜像，也不修改 Nginx Proxy
+Manager。旧镜像暂时保留，供人工诊断和回退；只有镜像增长成为实际问题时才增加
+自动保留策略。
 
-## Runner And Gateway Preparation
+## Runner 与网关准备
 
-Before synchronizing the deployment workflow, the gateway operator adds the
-`gateway` label to `gitea-runner-gatway` while retaining its existing labels,
-restarts only that runner if required by its configuration mechanism, and
-verifies it returns online with the new label. No repository workflow may use
-the misleading `emailbill` label for this deployment.
+部署工作流同步到 Gitea 前，网关运维人员需要在保留已有标签的同时，为
+`gitea-runner-gatway` 增加 `gateway` 标签。如果 Runner 的配置机制要求重启，
+只重启这一台 Runner，并确认它带着新标签重新上线。本仓库不得借用含义错误的
+`emailbill` 标签执行部署。
 
-The operator also confirms:
+运维人员同时确认：
 
-- `127.0.0.1:7681` remains unbound immediately before first deployment;
-- the historical Dockge `tradingagents` stack remains stopped;
-- Nginx Proxy Manager still maps `trading.suncheng.online` to
-  `127.0.0.1:7681`;
-- Docker and Compose are available to the gateway runner.
+- 首次部署前，`127.0.0.1:7681` 仍未被占用；
+- 历史 Dockge `tradingagents` Stack 继续保持停止；
+- Nginx Proxy Manager 仍将 `trading.suncheng.online` 指向
+  `127.0.0.1:7681`；
+- 网关 Runner 可以使用 Docker 和 Compose。
 
-These are preflight checks, not permissions to remove or rewrite historical
-stacks.
+这些是部署前检查，不授权删除或改写历史 Stack。
 
-## Failure Handling
+## 失败处理
 
-- Initialization precondition mismatch: make no ref changes and escalate the
-  newly observed Gitea state.
-- Normal synchronization non-fast-forward: fail without force.
-- Wrong Gitea server, repository, branch, or runner: skip/fail before Docker
-  mutation.
-- Build or candidate smoke failure: keep the current service unchanged.
-- Port conflict: fail before cutover and report the owning process/container.
-- Cutover health failure: restore the prior image when one existed; otherwise
-  stop the failed first deployment.
-- Nginx Proxy Manager route failure: leave the healthy loopback service
-  running and report the proxy as a separate operational failure.
-- No failure path deletes application data, historical stacks, images, or Git
-  refs other than the explicitly leased one-time `main` replacement.
+- 初始化前置条件不匹配：不修改引用，报告新发现的 Gitea 状态。
+- 常规同步遇到非快进：直接失败，不使用强制推送。
+- Gitea 地址、仓库、分支或 Runner 不匹配：在修改 Docker 前跳过或失败。
+- 构建或候选检查失败：保持当前服务不变。
+- 端口冲突：切换前失败，并报告占用端口的进程或容器。
+- 切换后健康检查失败：存在旧镜像时恢复旧镜像；首次部署则停止失败服务。
+- Nginx Proxy Manager 入口失败：保留健康的本机回环服务，将代理异常作为独立
+  运维问题报告。
+- 除精确租约保护的一次性 `main` 替换外，任何失败路径都不得删除应用数据、
+  历史 Stack、镜像或 Git 引用。
 
-## Testing
+## 测试
 
-Tests are written before implementation and cover:
+实现前先编写测试，覆盖以下行为：
 
-- exact root page bytes, `/healthz`, HEAD behavior, and 404 responses;
-- invalid server port configuration;
-- non-root image and Compose security settings;
-- exact loopback port `127.0.0.1:7681:8080`;
-- SHA-tagged image and revision metadata contract;
-- workflow platform/repository/ref guards, `gateway` runner label, pinned
-  actions, permissions, concurrency, and absence of secrets;
-- deployment script validation, candidate-before-cutover ordering, page and
-  health verification, and rollback behavior through a fake Docker/Curl
-  command harness;
-- one-time initialization success and rejection of changed SHA, changed tree,
-  lease races, arbitrary old SHA, broad force, mirror, wildcard, and deletion;
-- ordinary post-initialization fast-forward synchronization and rejection of
-  later divergence.
+- 根页面精确字节、`/healthz`、HEAD 请求和 404 响应；
+- 非法服务端口配置；
+- 非 root 镜像和 Compose 安全配置；
+- 精确的回环映射 `127.0.0.1:7681:8080`；
+- 完整 SHA 镜像标签和 revision 元数据契约；
+- 工作流的平台、仓库和 ref 守卫，`gateway` Runner 标签，固定 action SHA、
+  权限、串行配置以及无密钥约束；
+- 通过伪 Docker/Curl 命令环境验证部署脚本参数、候选先于切换、页面与健康检查、
+  失败回退；
+- 一次性初始化成功，以及旧 SHA 变化、提交树变化、租约竞态、任意旧 SHA、宽泛
+  force、mirror、通配和删除操作的拒绝行为；
+- 初始化后的常规快进同步，以及后续分支漂移的拒绝行为。
 
-Repository CI runs the web and infrastructure tests on pull requests and
-GitHub `main`. The Gitea deployment workflow performs candidate and live
-runtime checks on the gateway.
+GitHub 仓库 CI 在 Pull Request 和 GitHub `main` 上运行 Web 与基础设施测试。
+Gitea 部署工作流在网关上完成候选镜像和实际服务验证。
 
-## Acceptance Criteria
+## 验收标准
 
-1. The old Gitea root remains reachable through
-   `pre-github-sync-20260920-052251b1`, and Gitea/GitHub `main` resolve to the
-   same full SHA.
-2. A subsequent GitHub `main` commit reaches Gitea through a normal non-force
-   push.
-3. The Gitea deployment run is assigned to the runner with label `gateway` and
-   completes for that synchronized SHA.
-4. Exactly one `trading-agents-web` Compose web container is healthy and uses
-   `trading-agents-web-ui:<that SHA>` with matching revision metadata.
-5. `127.0.0.1:7681/healthz` returns `200` and `ok\n`; `/` returns the checked-in
-   empty page byte-for-byte.
-6. `trading.suncheng.online` returns the same page through the existing Nginx
-   Proxy Manager route.
-7. No runtime/application secret, TradingAgents data directory, historical
-   stack, or unrelated container is modified.
-8. A deliberately invalid candidate is rejected before cutover in tests, and
-   the previously healthy service remains selected.
+1. Gitea 旧根提交可通过 `pre-github-sync-20260920-052251b1` 找回，Gitea 与
+   GitHub `main` 解析到同一个完整 SHA。
+2. 后续 GitHub `main` 提交能够通过常规非强制推送到达 Gitea。
+3. Gitea 部署任务由带有 `gateway` 标签的 Runner 执行，并成功部署对应同步 SHA。
+4. 只有一个 `trading-agents-web` Compose Web 容器处于健康状态；它使用
+   `trading-agents-web-ui:<该 SHA>`，revision 元数据与提交一致。
+5. `127.0.0.1:7681/healthz` 返回 `200` 和 `ok\n`，`/` 返回仓库中的空白页
+   精确内容。
+6. `trading.suncheng.online` 通过现有 Nginx Proxy Manager 入口返回相同页面。
+7. 没有修改运行时或应用密钥、TradingAgents 数据目录、历史 Stack 或无关容器。
+8. 测试中的无效候选镜像在切换前被拒绝，先前健康服务仍保持选中状态。
 
-## Delivery Sequence
+## 交付顺序
 
-1. Implement and test the guarded one-time Gitea initialization path.
-2. Implement and test the blank web service, image, Compose contract, and
-   deployment script.
-3. Add and test the Gitea deployment workflow and GitHub CI coverage.
-4. Add the gateway runner label and verify runner availability.
-5. Execute the one-time guarded Gitea synchronization.
-6. Observe the first Gitea build/deploy and verify loopback plus public entry.
+1. 实现并测试受保护的一次性 Gitea 初始化流程。
+2. 实现并测试空白 Web 服务、镜像、Compose 契约和部署脚本。
+3. 添加并测试 Gitea 部署工作流和 GitHub CI 覆盖。
+4. 为网关 Runner 增加标签并确认 Runner 在线。
+5. 执行一次性受保护 Gitea 同步。
+6. 观察首次 Gitea 构建和部署，并验证回环地址与公开入口。
 
-Steps 4-6 are operational changes and occur only after the repository changes
-pass review and reach GitHub `main`.
+第 4 至第 6 步属于运维变更，只在仓库代码通过审查并进入 GitHub `main` 后执行。
