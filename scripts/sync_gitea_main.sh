@@ -50,7 +50,7 @@ if [[ "$actual_sha" != "$expected_sha" ]]; then
   exit 3
 fi
 
-git push --porcelain "$remote_url" HEAD:refs/heads/main
+git push --no-follow-tags --porcelain "$remote_url" HEAD:refs/heads/main
 remote_sha="$(git ls-remote "$remote_url" refs/heads/main | awk 'NR == 1 { print $1 }')"
 if [[ "$remote_sha" != "$expected_sha" ]]; then
   printf 'remote main SHA mismatch after push\n' >&2

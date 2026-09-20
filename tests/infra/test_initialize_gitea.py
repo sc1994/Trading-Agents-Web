@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/initialize_gitea_main.sh"
 BACKUP_TAG = "pre-github-sync-20260920-052251b1"
 SOURCE_ONLY_BRANCH = "source-only"
+SOURCE_ONLY_TAG = "source-only-tag"
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
@@ -76,6 +77,8 @@ def make_initialization_fixture(tmp_path: Path) -> InitializationFixture:
     initialize_repository(source)
     new_sha = commit_file(source, "payload.txt", "github\n", "GitHub main")
     git(source, "branch", SOURCE_ONLY_BRANCH, new_sha)
+    git(source, "tag", "-a", SOURCE_ONLY_TAG, new_sha, "-m", "Source-only release")
+    git(source, "config", "push.followTags", "true")
 
     old_worktree = tmp_path / "old-worktree"
     initialize_repository(old_worktree)
@@ -171,6 +174,7 @@ def test_initialization_backs_up_old_root_and_replaces_main(tmp_path: Path) -> N
         fixture.source, fixture.target, f"refs/tags/{BACKUP_TAG}^{{}}"
     ) == fixture.old_sha
     assert f"refs/heads/{SOURCE_ONLY_BRANCH}" not in after
+    assert f"refs/tags/{SOURCE_ONLY_TAG}" not in after
     assert_only_initialization_refs_changed(before, after)
     assert set(after) == {*before, f"refs/tags/{BACKUP_TAG}"}
 
@@ -279,11 +283,22 @@ def test_rejects_readme_containing_only_newline(tmp_path: Path) -> None:
 def test_rejects_arbitrary_expected_old_sha_argument(tmp_path: Path) -> None:
     fixture = make_initialization_fixture(tmp_path)
     before = remote_refs(fixture.target)
+    env, marker = install_git_call_detector(tmp_path)
 
-    result = run_initializer(fixture, extra_args=(fixture.old_sha,))
+    result = run(
+        "bash",
+        str(SCRIPT),
+        fixture.target.resolve().as_uri(),
+        fixture.new_sha,
+        fixture.old_sha,
+        cwd=fixture.source,
+        check=False,
+        env=env,
+    )
 
-    assert result.returncode != 0
+    assert result.returncode == 2
     assert "usage:" in result.stderr
+    assert not marker.exists()
     assert remote_refs(fixture.target) == before
 
 

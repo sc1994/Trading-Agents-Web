@@ -19,6 +19,11 @@ def git(cwd: Path, *args: str) -> str:
     return run("git", *args, cwd=cwd).stdout.strip()
 
 
+def remote_refs(source: Path, target: Path) -> dict[str, str]:
+    output = git(source, "--git-dir", str(target), "for-each-ref", "--format=%(refname) %(objectname)")
+    return dict(line.split() for line in output.splitlines())
+
+
 def commit(repo: Path, message: str, content: str) -> str:
     (repo / "payload.txt").write_text(content, encoding="utf-8")
     git(repo, "add", "payload.txt")
@@ -55,16 +60,30 @@ def test_script_pushes_main_and_rejects_non_fast_forward(tmp_path: Path) -> None
     git(source, "init", "-b", "main")
     git(source, "config", "user.name", "Infra Test")
     git(source, "config", "user.email", "infra-test@example.invalid")
+    git(source, "config", "push.followTags", "true")
     first = commit(source, "first", "first")
+    git(source, "branch", "source-only", first)
+    git(source, "tag", "-a", "source-only-tag", first, "-m", "Source-only release")
+    git(source, "tag", "-a", "preserved-tag", first, "-m", "Preserved tag")
     run("git", "init", "--bare", str(target), cwd=tmp_path)
     remote = target.resolve().as_uri()
+    git(
+        source,
+        "push",
+        "--no-follow-tags",
+        remote,
+        "HEAD:refs/heads/preserved-branch",
+        "refs/tags/preserved-tag:refs/tags/preserved-tag",
+    )
+    preserved_refs = remote_refs(source, target)
 
     run("bash", str(SCRIPT), remote, first, cwd=source)
-    assert git(source, "ls-remote", remote, "refs/heads/main").split()[0] == first
+    assert remote_refs(source, target) == {**preserved_refs, "refs/heads/main": first}
 
     second = commit(source, "second", "second")
+    git(source, "tag", "-a", "second-source-tag", second, "-m", "Second source release")
     run("bash", str(SCRIPT), remote, second, cwd=source)
-    assert git(source, "ls-remote", remote, "refs/heads/main").split()[0] == second
+    assert remote_refs(source, target) == {**preserved_refs, "refs/heads/main": second}
 
     run("git", "clone", "--branch", "main", remote, str(other), cwd=tmp_path)
     git(other, "config", "user.name", "Infra Test")
@@ -73,9 +92,10 @@ def test_script_pushes_main_and_rejects_non_fast_forward(tmp_path: Path) -> None
     git(other, "push", "origin", "HEAD:main")
 
     third = commit(source, "source divergence", "source")
+    git(source, "tag", "-a", "divergent-source-tag", third, "-m", "Divergent release")
     result = run("bash", str(SCRIPT), remote, third, cwd=source, check=False)
     assert result.returncode != 0
-    assert git(source, "ls-remote", remote, "refs/heads/main").split()[0] == divergent
+    assert remote_refs(source, target) == {**preserved_refs, "refs/heads/main": divergent}
 
 
 def test_https_mode_fails_before_git_when_token_is_missing(tmp_path: Path) -> None:

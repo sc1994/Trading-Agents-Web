@@ -23,13 +23,16 @@
 5. 不得手工运行 Compose 切换、手工覆盖 `7681` 服务、手工重跑部署脚本，或用 Git 宽泛覆盖方式处理同步失败。首次部署和后续部署均由已审查的 Gitea 工作流执行。
 6. 命令中绝不启用 shell tracing；不要把 token 写入 URL、仓库文件、终端历史、截图、日志或变更记录。
 
-每个代码块均以非零退出作为停止条件。不要在失败后跳到下一阶段。
+每个代码块都完整包在独立的 `( ... )` 子 shell 中；连同括号一起执行，变量、
+readonly 声明、shell 选项和 trap 均只在该块内有效。不要拆开括号或把变量预先定义到
+父 shell。每个代码块均以非零退出作为停止条件，不要在失败后跳到下一阶段。
 
 ## 阶段 0：合并后才开始
 
 在干净的 GitHub `main` checkout 中执行。下面的变量均由紧邻的只读命令解析；先人工查看打印值，再继续。此阶段不修改远端或网关。
 
 ```bash
+(
 set -euo pipefail
 
 readonly GITHUB_REMOTE='https://github.com/sc1994/Trading-Agents-Web.git'
@@ -46,12 +49,14 @@ printf 'local=%s\ngithub-main=%s\ngitea-main=%s\n' \
 
 test "$LOCAL_SHA" = "$GITHUB_MAIN_SHA"
 test "$GITEA_MAIN_SHA" = "$EXPECTED_OLD_SHA"
-case "$LOCAL_SHA" in [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
-  *) printf 'invalid GitHub main SHA\n' >&2; exit 1 ;;
-esac
+if [[ ! "$LOCAL_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+  printf 'invalid GitHub main SHA\n' >&2
+  exit 1
+fi
 
 DEPLOY_SHA="$LOCAL_SHA"
 printf 'approved deployment SHA=%s\n' "$DEPLOY_SHA"
+)
 ```
 
 人工在 GitHub 的目标提交页面确认 Task 1 至 Task 4 的必需 CI 均为绿色，且该提交已在受保护的 `main`。无法读取或确认 CI 结论时，停止并联系 Multica 小队成员。
@@ -61,6 +66,7 @@ printf 'approved deployment SHA=%s\n' "$DEPLOY_SHA"
 在网关上、使用现有 Runner 所在的受控账户执行。以下命令不改变 Docker、端口或代理配置。输出仅供人工核对，不要据此清理任何对象。
 
 ```bash
+(
 set -euo pipefail
 
 command -v docker
@@ -75,23 +81,43 @@ command -v ss
 printf '%s\n' 'listeners on 7681:'
 ss -H -ltn 'sport = :7681'
 
-printf '%s\n' 'running containers mentioning TradingAgents:'
-docker ps --format '{{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Labels}}'
-
-printf '%s\n' 'existing gateway web project containers:'
-docker ps --all \
-  --filter 'label=com.docker.compose.project=trading-agents-web' \
-  --filter 'label=com.docker.compose.service=web' \
-  --format '{{.ID}}\t{{.Image}}\t{{.Status}}\t{{.Labels}}'
+printf '%s\n' 'containers publishing 7681 (ID/name/image/status/compose project/service):'
+docker ps --filter 'publish=7681' \
+  --format '{{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Label "com.docker.compose.project"}}\t{{.Label "com.docker.compose.service"}}'
+)
 ```
 
 首次上线的预期是：Docker 和 Compose 可用，`7681` 没有监听者，且历史 Dockge
-`tradingagents` Stack 仍停止。若 `ss` 有输出、历史 Stack 状态无法从既有 Dockge
-界面与容器列表确认，或 Docker/Compose 不可用，停止并联系 Multica 小队成员；不要释放端口、修改 Stack 或调整 Docker 权限。
+`tradingagents` Stack 仍停止。Docker 查询只列出发布 `7681` 的容器及必要字段；
+历史 Stack 的停止状态仅从既有 Dockge 界面的该 Stack 页面只读确认，不扩展容器查询。
+若 `ss` 或该 Docker 查询有输出、历史 Stack 状态无法确认，或 Docker/Compose 不可用，
+停止并联系 Multica 小队成员；不要释放端口、修改 Stack 或调整 Docker 权限。
 
 在既有 Nginx Proxy Manager 管理界面中以只读方式确认
 `trading.suncheng.online` 仍转发到 `127.0.0.1:7681`。此检查不是修改代理的授权。
 如果没有已获授权的只读查看方式，或当前路由与该目标不一致，停止并联系 Multica 小队成员。
+
+### Actions 兼容性硬门禁：首次同步前必须通过
+
+在激活任何部署工作流前，从现有管理界面或已确认的只读版本查询取得**实际运行的
+Gitea 完整版本/构建标识**及 `gitea-runner-gatway` 的 **act_runner 完整版本/构建标识**，
+并记录来源和时间。镜像的 `latest` 标签、仓库 YAML 被接受或 Runner 在线均不能证明兼容。
+
+将这两个实际版本与对应版本的 Gitea Actions / act_runner 官方支持说明逐项核对，
+并取得与现场版本、配置一致的隔离环境验证记录，或 Multica 已有的等效行为证据：
+
+- `concurrency`：固定 group `trading-agents-web-gateway-deploy` 在 push 与人工触发之间
+  均生效，同组部署不会同时执行；`cancel-in-progress: false` 不取消正在执行的部署。
+  证据需包括工作流定义、运行 ID、排队/开始/结束时间及最终执行顺序，确认不会让旧部署
+  在新部署之后覆盖运行版本。
+- `permissions`：`contents: read` 实际限制工作流 token 的仓库权限，未声明权限不会
+  隐式赋予写入能力。证据需证明 checkout 可读且写入被拒绝，记录权限结论而非 token。
+  不得只凭 YAML 字段存在、checkout 的 `persist-credentials: false` 或文档的笼统兼容声明放行。
+
+**任何一项不支持、被忽略、版本不明，或缺少可核验的实际行为证据，都必须停止并联系
+Multica 小队成员；不得进入阶段 3，不得执行初始化或普通同步来激活部署 workflow。**
+不得先同步再试验。此手册仅允许读取已有证据，不授权在真实网关或目标仓库创建验证任务、
+升级组件、改权限或用其他锁替代该门禁。需要新的隔离验证时，由 Multica 安排。
 
 ## 阶段 2：为现有 Runner 增加专用标签
 
@@ -107,7 +133,8 @@ Gitea 管理界面确认它处于在线状态，标签集合仍包含
 
 ## 阶段 3：一次性初始化 Gitea `main`
 
-只在阶段 0 至阶段 2 均完成后执行。以下单一受控子 shell 在远端写入前 fresh fetch
+只在阶段 0 至阶段 2 均完成，且上述 Actions 兼容性硬门禁的版本与行为证据均已记录并
+核验通过后执行；证据缺失即停止，不能运行下面的代码块。以下单一受控子 shell 在远端写入前 fresh fetch
 GitHub `main`，重新读取 GitHub 与 Gitea，固定唯一的 `DEPLOY_SHA`，并再次验证 Gitea
 仍是固定旧根。它不会沿用任何前一代码块中的变量。若 checkout 或任一远端在此期间漂移，
 命令会在读取 token 或写入前失败。
@@ -159,6 +186,7 @@ shell 和初始化脚本的临时 askpass 环境中；不要使用预先导出�
 初始化成功后，使用只读 Git 查询验证备份标签和两端 `main`。先读取并显示，再由命令执行精确比较。
 
 ```bash
+(
 set -euo pipefail
 
 readonly GITHUB_REMOTE='https://github.com/sc1994/Trading-Agents-Web.git'
@@ -176,6 +204,7 @@ printf 'backup-peeled=%s\ngithub-main=%s\ngitea-main=%s\ndeployment=%s\n' \
 test "$BACKUP_PEELED_SHA" = "$EXPECTED_OLD_SHA"
 test "$GITHUB_MAIN_SHA" = "$DEPLOY_SHA"
 test "$GITEA_MAIN_SHA" = "$DEPLOY_SHA"
+)
 ```
 
 在 Gitea 的 `suncheng/Trading-Agents-Web` Actions 页面找到本次 `main` 推送生成的首次工作流。确认：
@@ -196,13 +225,14 @@ test "$GITEA_MAIN_SHA" = "$DEPLOY_SHA"
 仅在首次工作流显示成功后，于网关 checkout 中执行。此代码块只读取 Docker 状态和发起 HTTP GET；临时目录在退出时移除。
 
 ```bash
+(
 set -euo pipefail
 
 DEPLOY_SHA="$(git rev-parse HEAD)"
-case "$DEPLOY_SHA" in
-  [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
-  *) printf 'invalid deployment SHA\n' >&2; exit 1 ;;
-esac
+if [[ ! "$DEPLOY_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+  printf 'invalid deployment SHA\n' >&2
+  exit 1
+fi
 
 WEB_CONTAINER_IDS="$(docker ps \
   --filter 'label=com.docker.compose.project=trading-agents-web' \
@@ -237,13 +267,20 @@ cmp -s "$RESULT_DIR/local-page" web/index.html
 curl --fail --silent --show-error --connect-timeout 2 --max-time 10 \
   --output "$RESULT_DIR/public-page" https://trading.suncheng.online/
 cmp -s "$RESULT_DIR/public-page" web/index.html
+)
 ```
 
 成功条件是恰有一个健康的 `trading-agents-web` / `web` 容器，其镜像名、容器
 revision 和镜像 revision 都等于 `DEPLOY_SHA`；本机 `/healthz` 精确为 `ok` 加换行，
 本机和公开根页面均与 `web/index.html` 字节相同。
 
-若本机回环验收失败，停止并联系 Multica 小队成员。工作流已按脚本契约尝试恢复旧镜像；不要在现场再切换或清理。若本机通过但公开页面失败，保留健康回环服务，停止并联系 Multica 小队成员，将其作为代理入口问题处理；不得修改 Nginx Proxy Manager。
+自动回退仅发生在 workflow 内部署脚本的切换或切换后验证失败时：存在旧镜像则尝试
+恢复旧镜像，首次失败则尝试停止失败服务，具体结果以该次失败工作流的证据为准。
+阶段 5 在 workflow 已成功结束后独立执行，此时的 Docker 或回环验收失败**不会触发
+自动回退，也不能据此声称已尝试回退**。应停止并联系 Multica 小队成员，保留当前状态，
+仅收集本服务的只读证据进行人工调查；不要在现场切换或清理。
+若本机通过但公开页面失败，保留健康回环服务，停止并联系 Multica 小队成员，将其作为
+代理入口问题处理；不得修改 Nginx Proxy Manager。
 
 ## 阶段 6：证据记录与后续普通同步
 
@@ -251,6 +288,8 @@ revision 和镜像 revision 都等于 `DEPLOY_SHA`；本机 `/healthz` 精确为
 
 - GitHub `main` 完整 SHA 与 Gitea `main` 完整 SHA
 - 备份标签 `pre-github-sync-20260920-052251b1` 的 peeled SHA
+- 实际 Gitea / act_runner 版本、查询来源与时间、对应版本的支持说明，以及
+  `concurrency` / `permissions` 行为验证证据和门禁核验结论
 - 首次 Gitea workflow URL、运行 ID、结果、目标 SHA 和 Runner 名称
 - 容器 ID、镜像 ID、镜像名、两个 revision 值、健康状态
 - 本机 `/healthz`、本机页面和公开页面的验收时间与结果
@@ -262,6 +301,7 @@ revision 和镜像 revision 都等于 `DEPLOY_SHA`；本机 `/healthz` 精确为
 后续提交的只读同步核对可使用：
 
 ```bash
+(
 set -euo pipefail
 
 readonly GITHUB_REMOTE='https://github.com/sc1994/Trading-Agents-Web.git'
@@ -270,6 +310,7 @@ GITHUB_MAIN_SHA="$(git ls-remote "$GITHUB_REMOTE" refs/heads/main | awk 'NR == 1
 GITEA_MAIN_SHA="$(git ls-remote "$GITEA_REMOTE" refs/heads/main | awk 'NR == 1 { print $1 }')"
 printf 'github-main=%s\ngitea-main=%s\n' "$GITHUB_MAIN_SHA" "$GITEA_MAIN_SHA"
 test "$GITHUB_MAIN_SHA" = "$GITEA_MAIN_SHA"
+)
 ```
 
 若常规同步因非快进、漂移或权限问题失败，保持 GitHub 为权威源并停止并联系 Multica 小队成员；不得覆盖 Gitea 分歧。
@@ -279,7 +320,9 @@ test "$GITHUB_MAIN_SHA" = "$GITEA_MAIN_SHA"
 提交前可执行以下只读扫描。它只用于检查本手册，不是自动化测试。
 
 ```bash
+(
 set -euo pipefail
 ! rg -n -i 'TB[D]|TO[D]O|implement[[:space:]]+later|fill[[:space:]]+in' \
   docs/operations/gateway-web-deployment.md
+)
 ```

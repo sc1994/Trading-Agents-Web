@@ -90,7 +90,7 @@ remote_tag_sha="$(
     awk 'NR == 1 { print $1 }'
 )"
 if [[ -z "$remote_tag_sha" ]]; then
-  git push "$remote_url" \
+  git push --no-follow-tags "$remote_url" \
     "refs/tags/${temporary_tag}:refs/tags/${backup_tag}"
 else
   test "$remote_tag_sha" = "$expected_old_sha"
@@ -100,7 +100,7 @@ test "$(
     awk 'NR == 1 { print $1 }'
 )" = "$expected_old_sha"
 
-git push --force-with-lease="refs/heads/main:${expected_old_sha}" \
+git push --no-follow-tags --force-with-lease="refs/heads/main:${expected_old_sha}" \
   "$remote_url" HEAD:refs/heads/main
 test "$(
   git ls-remote "$remote_url" refs/heads/main |
