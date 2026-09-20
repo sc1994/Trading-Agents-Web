@@ -78,7 +78,7 @@ observed_old_sha="$(git rev-parse "$initialization_ref")"
 test "$observed_old_sha" = "$expected_old_sha"
 test "$(git rev-list --parents -n 1 "$observed_old_sha" | wc -w)" -eq 1
 test "$(git ls-tree -r --name-only "$observed_old_sha")" = "README.md"
-test -z "$(git show "${observed_old_sha}:README.md")"
+test "$(git cat-file -s "${observed_old_sha}:README.md")" -eq 0
 
 temporary_tag="gitea-initialize-$$"
 git -c user.name='Trading Agents Sync' \

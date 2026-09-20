@@ -7,6 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/initialize_gitea_main.sh"
 BACKUP_TAG = "pre-github-sync-20260920-052251b1"
+SOURCE_ONLY_BRANCH = "source-only"
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
@@ -74,6 +75,7 @@ def make_initialization_fixture(tmp_path: Path) -> InitializationFixture:
     source = tmp_path / "source"
     initialize_repository(source)
     new_sha = commit_file(source, "payload.txt", "github\n", "GitHub main")
+    git(source, "branch", SOURCE_ONLY_BRANCH, new_sha)
 
     old_worktree = tmp_path / "old-worktree"
     initialize_repository(old_worktree)
@@ -168,6 +170,7 @@ def test_initialization_backs_up_old_root_and_replaces_main(tmp_path: Path) -> N
     assert remote_sha(
         fixture.source, fixture.target, f"refs/tags/{BACKUP_TAG}^{{}}"
     ) == fixture.old_sha
+    assert f"refs/heads/{SOURCE_ONLY_BRANCH}" not in after
     assert_only_initialization_refs_changed(before, after)
     assert set(after) == {*before, f"refs/tags/{BACKUP_TAG}"}
 
@@ -253,6 +256,26 @@ def test_rejects_nonempty_readme(tmp_path: Path) -> None:
     assert remote_refs(fixture.target) == before
 
 
+def test_rejects_readme_containing_only_newline(tmp_path: Path) -> None:
+    fixture = make_initialization_fixture(tmp_path)
+    old_repo, malformed_sha = make_root_commit(
+        tmp_path, "newline-readme", {"README.md": "\n"}
+    )
+    git(
+        old_repo,
+        "push",
+        "--force",
+        fixture.target.resolve().as_uri(),
+        f"{malformed_sha}:refs/heads/main",
+    )
+    before = remote_refs(fixture.target)
+
+    result = run_initializer(fixture, expected_old_sha=malformed_sha)
+
+    assert result.returncode != 0
+    assert remote_refs(fixture.target) == before
+
+
 def test_rejects_arbitrary_expected_old_sha_argument(tmp_path: Path) -> None:
     fixture = make_initialization_fixture(tmp_path)
     before = remote_refs(fixture.target)
@@ -316,6 +339,7 @@ def test_reuses_existing_backup_tag_only_when_it_peels_to_old_sha(
     after = remote_refs(fixture.target)
     assert after["refs/heads/main"] == fixture.new_sha
     assert after[f"refs/tags/{BACKUP_TAG}"] == backup_object
+    assert f"refs/heads/{SOURCE_ONLY_BRANCH}" not in after
     assert_only_initialization_refs_changed(before, after)
     assert set(after) == set(before)
 
@@ -385,6 +409,7 @@ def test_exact_lease_rejects_main_race_after_backup_tag(tmp_path: Path) -> None:
     assert remote_sha(
         fixture.source, fixture.target, f"refs/tags/{BACKUP_TAG}^{{}}"
     ) == fixture.old_sha
+    assert f"refs/heads/{SOURCE_ONLY_BRANCH}" not in after
     assert_only_initialization_refs_changed(before, after)
     assert set(after) == {*before, f"refs/tags/{BACKUP_TAG}"}
 
