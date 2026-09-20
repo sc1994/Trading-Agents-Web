@@ -25,7 +25,7 @@ def test_compose_binds_only_fixed_loopback_port_and_has_no_secrets() -> None:
     assert service["image"] == "${TRADINGAGENTS_WEB_IMAGE:?required}"
     assert service["ports"] == ["127.0.0.1:7681:8080"]
     assert service["restart"] == "unless-stopped"
-    assert service["read_only"] == "true"
+    assert service["read_only"] is True
     assert service["cap_drop"] == ["ALL"]
     assert service["security_opt"] == ["no-new-privileges:true"]
     assert service["tmpfs"] == ["/tmp:rw,noexec,nosuid,size=16m"]
@@ -55,11 +55,18 @@ name = Path(sys.argv[0]).name
 args = sys.argv[1:]
 env = os.environ
 log_path = Path(env["FAKE_COMMAND_LOG"])
+previous_records = []
+if log_path.exists():
+    previous_records = [
+        json.loads(line)
+        for line in log_path.read_text(encoding="utf-8").splitlines()
+    ]
 record = {
     "command": [name, *args],
     "allowed": False,
     "image": env.get("TRADINGAGENTS_WEB_IMAGE", ""),
     "revision": env.get("TRADINGAGENTS_WEB_REVISION", ""),
+    "resolved_image_id": "",
 }
 stdout = ""
 exit_code = 0
@@ -91,6 +98,9 @@ if name == "docker":
     elif args == ["inspect", "--format", "{{.Config.Image}}", "existing-container"]:
         allow()
         stdout = env.get("FAKE_EXISTING_IMAGE", "") + "\n"
+    elif args == ["inspect", "--format", "{{.Image}}", "existing-container"]:
+        allow()
+        stdout = env.get("FAKE_EXISTING_IMAGE_ID", "") + "\n"
     elif args == [
         "build", "--label", f'org.opencontainers.image.revision={env["FAKE_SHA"]}',
         "--tag", f'trading-agents-web-ui:{env["FAKE_SHA"]}',
@@ -98,14 +108,33 @@ if name == "docker":
     ]:
         allow()
     elif len(args) == 5 and args[:3] == ["image", "inspect", "--format"]:
-        expected_format = '{{ index .Config.Labels "org.opencontainers.image.revision" }}'
+        revision_format = '{{ index .Config.Labels "org.opencontainers.image.revision" }}'
+        id_format = "{{.Id}}"
         image = args[4]
-        if args[3] == expected_format and image == f'trading-agents-web-ui:{env["FAKE_SHA"]}':
+        new_image = f'trading-agents-web-ui:{env["FAKE_SHA"]}'
+        built_new_image = any(
+            previous["command"][:2] == ["docker", "build"]
+            for previous in previous_records
+        )
+        if args[3] == revision_format and image == new_image:
             allow()
             stdout = env["FAKE_SHA"] + "\n"
-        elif args[3] == expected_format and image == env.get("FAKE_EXISTING_IMAGE"):
+        elif args[3] == revision_format and image in {
+            env.get("FAKE_EXISTING_IMAGE"),
+            env.get("FAKE_EXISTING_IMAGE_ID"),
+        }:
             allow()
             stdout = env.get("FAKE_OLD_REVISION", "") + "\n"
+        elif args[3] == id_format and image == new_image:
+            allow()
+            if built_new_image:
+                stdout = "sha256:new-build-image\n"
+            elif env.get("FAKE_EXISTING_IMAGE") == new_image:
+                stdout = env.get("FAKE_EXISTING_IMAGE_ID", "") + "\n"
+            elif env.get("FAKE_EXISTING_SHA_IMAGE_ID"):
+                stdout = env["FAKE_EXISTING_SHA_IMAGE_ID"] + "\n"
+            else:
+                exit_code = 1
     elif len(args) == 15 and args[:4] == ["run", "--detach", "--rm", "--name"]:
         candidate = args[4]
         expected = [
@@ -157,15 +186,29 @@ elif name == "docker-compose":
         valid_release or valid_rollback
     ):
         allow()
+        built_new_image = any(
+            previous["command"][:2] == ["docker", "build"]
+            for previous in previous_records
+        )
+        if image == new_image and built_new_image:
+            record["resolved_image_id"] = "sha256:new-build-image"
+        elif image == env.get("FAKE_EXISTING_IMAGE"):
+            record["resolved_image_id"] = env.get("FAKE_EXISTING_IMAGE_ID", "")
+        else:
+            record["resolved_image_id"] = env.get("FAKE_EXISTING_SHA_IMAGE_ID", "")
     elif action == ["ps", "--quiet", "web"] and (valid_release or valid_rollback):
         allow()
         stdout = "live-web\n"
     elif action == ["stop", "web"] and valid_release:
         allow()
 elif name == "curl":
-    if len(args) == 6 and args[:4] == ["--fail", "--silent", "--show-error", "--output"]:
-        output = Path(args[4])
-        url = args[5]
+    curl_prefix = [
+        "--fail", "--silent", "--show-error",
+        "--connect-timeout", "2", "--max-time", "5", "--output",
+    ]
+    if len(args) == 10 and args[:8] == curl_prefix:
+        output = Path(args[8])
+        url = args[9]
         allowed_urls = {
             "http://127.0.0.1:49152/healthz",
             "http://127.0.0.1:49152/",
@@ -181,9 +224,37 @@ elif name == "curl":
             new_release = env.get("TRADINGAGENTS_WEB_IMAGE") == (
                 f'trading-agents-web-ui:{env["FAKE_SHA"]}'
             )
-            if candidate and health and env.get("FAKE_CANDIDATE_HEALTH") != "ok":
+            previous_candidate_health_calls = sum(
+                previous["command"][0] == "curl"
+                and previous["command"][-1] == "http://127.0.0.1:49152/healthz"
+                for previous in previous_records
+            )
+            previous_live_health_calls = sum(
+                previous["command"][0] == "curl"
+                and previous["command"][-1] == "http://127.0.0.1:7681/healthz"
+                for previous in previous_records
+            )
+            candidate_health = env.get("FAKE_CANDIDATE_HEALTH")
+            if candidate and health and candidate_health == "fail":
+                exit_code = 7
+            elif (
+                candidate
+                and health
+                and candidate_health == "fail-once"
+                and previous_candidate_health_calls == 0
+            ):
+                exit_code = 7
+            elif not candidate and health and new_release and env.get("FAKE_LIVE_HEALTH") == "timeout":
+                exit_code = 28
+            elif (
+                not candidate
+                and health
+                and new_release
+                and env.get("FAKE_LIVE_HEALTH") == "fail-once"
+                and previous_live_health_calls == 0
+            ):
                 exit_code = 22
-            elif not candidate and health and new_release and env.get("FAKE_LIVE_HEALTH") != "ok":
+            elif not candidate and health and new_release and env.get("FAKE_LIVE_HEALTH") == "fail":
                 exit_code = 22
             elif health:
                 output.write_bytes(b"ok\n")
@@ -252,6 +323,8 @@ class FakeCommands:
             "FAKE_INDEX": str(INDEX),
             "FAKE_SHA": SHA,
             "FAKE_EXISTING_IMAGE": "",
+            "FAKE_EXISTING_IMAGE_ID": "sha256:old-image",
+            "FAKE_EXISTING_SHA_IMAGE_ID": "",
             "FAKE_OLD_REVISION": OLD_SHA,
             "FAKE_PORT_OWNER": "none",
             "FAKE_CANDIDATE_HEALTH": "ok",
@@ -332,10 +405,30 @@ def test_candidate_is_verified_before_cutover(fake_commands: FakeCommands) -> No
 def test_candidate_failure_never_calls_cutover(fake_commands: FakeCommands) -> None:
     result = fake_commands.run(FAKE_CANDIDATE_HEALTH="fail")
 
-    assert result.returncode == 22
+    assert result.returncode == 7
     invoked = commands(fake_commands.calls())
+    assert sum(
+        call[0] == "curl" and call[-1] == "http://127.0.0.1:49152/healthz"
+        for call in invoked
+    ) == 30
+    assert sum(call == ["sleep", "1"] for call in invoked) == 29
     assert any(call[:3] == ["docker", "rm", "--force"] for call in invoked)
     assert not any(call[0] == "docker-compose" for call in invoked)
+
+
+def test_candidate_readiness_retries_transient_connection_failure(
+    fake_commands: FakeCommands,
+) -> None:
+    result = fake_commands.run(FAKE_CANDIDATE_HEALTH="fail-once")
+
+    assert result.returncode == 0, result.stderr
+    invoked = commands(fake_commands.calls())
+    assert sum(
+        call[0] == "curl" and call[-1] == "http://127.0.0.1:49152/healthz"
+        for call in invoked
+    ) == 2
+    assert sum(call == ["sleep", "1"] for call in invoked) == 1
+    assert sum(call[0] == "docker-compose" and "up" in call for call in invoked) == 1
 
 
 def test_candidate_page_must_match_checked_in_bytes(fake_commands: FakeCommands) -> None:
@@ -411,6 +504,39 @@ def test_failed_first_deployment_stops_service(fake_commands: FakeCommands) -> N
     assert all(call["image"] != OLD_IMAGE for call in calls)
 
 
+def test_live_timeout_restores_previous_image(fake_commands: FakeCommands) -> None:
+    result = fake_commands.run(
+        FAKE_EXISTING_IMAGE=OLD_IMAGE,
+        FAKE_PORT_OWNER="project",
+        FAKE_LIVE_HEALTH="timeout",
+    )
+
+    assert result.returncode == 28
+    calls = fake_commands.calls()
+    ups = [
+        call
+        for call in calls
+        if call["command"][0] == "docker-compose" and "up" in call["command"]
+    ]
+    assert [(call["image"], call["revision"]) for call in ups] == [
+        (f"trading-agents-web-ui:{SHA}", SHA),
+        (OLD_IMAGE, OLD_SHA),
+    ]
+    assert not any(call["command"][-2:] == ["stop", "web"] for call in calls)
+
+
+def test_live_timeout_on_first_deployment_stops_service(fake_commands: FakeCommands) -> None:
+    result = fake_commands.run(FAKE_LIVE_HEALTH="timeout")
+
+    assert result.returncode == 28
+    calls = fake_commands.calls()
+    assert sum(
+        call["command"][0] == "docker-compose" and "up" in call["command"]
+        for call in calls
+    ) == 1
+    assert sum(call["command"][-2:] == ["stop", "web"] for call in calls) == 1
+
+
 def test_live_page_mismatch_restores_previous_image(fake_commands: FakeCommands) -> None:
     result = fake_commands.run(
         FAKE_EXISTING_IMAGE=OLD_IMAGE,
@@ -430,6 +556,40 @@ def test_live_page_mismatch_restores_previous_image(fake_commands: FakeCommands)
         (OLD_IMAGE, OLD_SHA),
     ]
     assert not any(call["command"][-2:] == ["stop", "web"] for call in calls)
+
+
+def test_same_sha_reuses_running_image_without_overwriting_rollback_target(
+    fake_commands: FakeCommands,
+) -> None:
+    image = f"trading-agents-web-ui:{SHA}"
+    result = fake_commands.run(
+        FAKE_EXISTING_IMAGE=image,
+        FAKE_EXISTING_IMAGE_ID="sha256:running-old-image",
+        FAKE_OLD_REVISION=SHA,
+        FAKE_PORT_OWNER="project",
+        FAKE_LIVE_HEALTH="fail-once",
+    )
+
+    assert result.returncode == 22
+    calls = fake_commands.calls()
+    assert not any(call["command"][:2] == ["docker", "build"] for call in calls)
+    ups = [
+        call
+        for call in calls
+        if call["command"][0] == "docker-compose" and "up" in call["command"]
+    ]
+    assert [(call["image"], call["revision"]) for call in ups] == [
+        (image, SHA),
+        (image, SHA),
+    ]
+    assert [call["resolved_image_id"] for call in ups] == [
+        "sha256:running-old-image",
+        "sha256:running-old-image",
+    ]
+    assert sum(
+        call["command"][-1] == "http://127.0.0.1:7681/healthz" for call in calls
+    ) == 2
+    assert any(call["command"][-1] == "http://127.0.0.1:7681/" for call in calls)
 
 
 @pytest.mark.parametrize("invalid_sha", ["abc", "A" * 40])
