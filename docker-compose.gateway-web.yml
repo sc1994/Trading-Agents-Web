@@ -1,0 +1,25 @@
+services:
+  web:
+    image: ${TRADINGAGENTS_WEB_IMAGE:?required}
+    labels:
+      org.opencontainers.image.revision: ${TRADINGAGENTS_WEB_REVISION:?required}
+    ports:
+      - "127.0.0.1:7681:8080"
+    restart: unless-stopped
+    read_only: "true"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8080/healthz", timeout=2).read()'
+      interval: 5s
+      timeout: 3s
+      retries: 6
+      start_period: 2s
