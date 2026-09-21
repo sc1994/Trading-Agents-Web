@@ -105,6 +105,14 @@ def gateway_ci_job() -> dict[str, object]:
     return workflow["jobs"]["gateway-web-image"]
 
 
+def test_github_ci_test_job_fetches_full_history_for_provenance_checks() -> None:
+    workflow = load_workflow(CI_WORKFLOW)
+    checkout = workflow["jobs"]["test"]["steps"][0]
+
+    assert checkout["uses"] == "actions/checkout@v4"
+    assert checkout["with"] == {"fetch-depth": "0"}
+
+
 def test_github_ci_builds_gateway_web_image_from_the_checked_out_sha() -> None:
     job = gateway_ci_job()
     checkout = job["steps"][0]
