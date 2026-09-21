@@ -1,0 +1,36 @@
+name: Initialize Gitea main
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: Confirm one-time Gitea main initialization
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: initialize-gitea-main
+  cancel-in-progress: false
+
+jobs:
+  initialize-main:
+    if: ${{ github.server_url == 'https://github.com' && github.repository == 'sc1994/Trading-Agents-Web' && github.ref == 'refs/heads/main' && inputs.confirm == true }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the authoritative commit with history
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Replace the invalid Gitea main after creating its backup
+        env:
+          TRADING_AGENTS_WEB_GITEA_SYNC_TOKEN: ${{ secrets.TRADING_AGENTS_WEB_GITEA_SYNC_TOKEN }}
+        run: >-
+          bash scripts/initialize_gitea_main.sh
+          https://gitea.suncheng.online:81/suncheng/Trading-Agents-Web.git
+          "${GITHUB_SHA}"

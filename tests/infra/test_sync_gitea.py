@@ -7,6 +7,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github/workflows/sync-gitea.yml"
+INITIALIZATION_WORKFLOW = ROOT / ".github/workflows/initialize-gitea.yml"
 SCRIPT = ROOT / "scripts/sync_gitea_main.sh"
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
@@ -52,6 +53,42 @@ def test_workflow_has_read_only_single_branch_contract() -> None:
     script = SCRIPT.read_text(encoding="utf-8")
     assert "HEAD:refs/heads/main" in script
     assert all(flag not in script for flag in ("--force", "--mirror", "--delete"))
+
+
+def test_initialization_workflow_is_manual_and_reuses_the_guarded_script() -> None:
+    document = yaml.load(
+        INITIALIZATION_WORKFLOW.read_text(encoding="utf-8"), Loader=yaml.BaseLoader
+    )
+
+    assert document["on"] == {
+        "workflow_dispatch": {
+            "inputs": {
+                "confirm": {
+                    "description": "Confirm one-time Gitea main initialization",
+                    "required": "true",
+                    "type": "boolean",
+                    "default": "false",
+                }
+            }
+        }
+    }
+    assert document["permissions"] == {"contents": "read"}
+    job = document["jobs"]["initialize-main"]
+    assert "github.server_url == 'https://github.com'" in job["if"]
+    assert "github.repository == 'sc1994/Trading-Agents-Web'" in job["if"]
+    assert "github.ref == 'refs/heads/main'" in job["if"]
+    assert "inputs.confirm == true" in job["if"]
+    assert job["steps"][0]["with"] == {
+        "ref": "${{ github.sha }}",
+        "fetch-depth": "0",
+        "persist-credentials": "false",
+    }
+    assert job["steps"][1]["env"] == {
+        "TRADING_AGENTS_WEB_GITEA_SYNC_TOKEN": (
+            "${{ secrets.TRADING_AGENTS_WEB_GITEA_SYNC_TOKEN }}"
+        )
+    }
+    assert "scripts/initialize_gitea_main.sh" in job["steps"][1]["run"]
 
 
 def test_script_pushes_main_and_rejects_non_fast_forward(tmp_path: Path) -> None:
