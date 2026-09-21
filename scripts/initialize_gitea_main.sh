@@ -42,8 +42,8 @@ case "$remote_url" in
       printf 'test old SHA override is forbidden for HTTPS\n' >&2
       exit 7
     fi
-    if [[ -z "${GITEA_MIRROR_SYNC_TOKEN:-}" ]]; then
-      printf 'GITEA_MIRROR_SYNC_TOKEN is required for HTTPS initialization\n' >&2
+    if [[ -z "${TRADING_AGENTS_WEB_GITEA_SYNC_TOKEN:-}" ]]; then
+      printf 'TRADING_AGENTS_WEB_GITEA_SYNC_TOKEN is required for HTTPS initialization\n' >&2
       exit 4
     fi
     askpass="$(mktemp)"
@@ -52,7 +52,7 @@ case "$remote_url" in
 #!/usr/bin/env bash
 case "$1" in
   *Username*) printf '%s\n' 'git' ;;
-  *Password*) printf '%s\n' "$GITEA_MIRROR_SYNC_TOKEN" ;;
+  *Password*) printf '%s\n' "$TRADING_AGENTS_WEB_GITEA_SYNC_TOKEN" ;;
   *) exit 1 ;;
 esac
 ASKPASS

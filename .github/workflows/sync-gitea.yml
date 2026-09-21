@@ -24,7 +24,7 @@ jobs:
           persist-credentials: false
       - name: Push only HEAD to Gitea main and verify the SHA
         env:
-          GITEA_MIRROR_SYNC_TOKEN: ${{ secrets.GITEA_MIRROR_SYNC_TOKEN }}
+          TRADING_AGENTS_WEB_GITEA_SYNC_TOKEN: ${{ secrets.TRADING_AGENTS_WEB_GITEA_SYNC_TOKEN }}
         run: >-
           bash scripts/sync_gitea_main.sh
           https://gitea.suncheng.online:81/suncheng/Trading-Agents-Web.git

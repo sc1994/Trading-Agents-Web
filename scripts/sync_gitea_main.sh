@@ -19,8 +19,8 @@ trap cleanup EXIT
 
 case "$remote_url" in
   https://*)
-    if [[ -z "${GITEA_MIRROR_SYNC_TOKEN:-}" ]]; then
-      printf 'GITEA_MIRROR_SYNC_TOKEN is required for HTTPS sync\n' >&2
+    if [[ -z "${TRADING_AGENTS_WEB_GITEA_SYNC_TOKEN:-}" ]]; then
+      printf 'TRADING_AGENTS_WEB_GITEA_SYNC_TOKEN is required for HTTPS sync\n' >&2
       exit 4
     fi
     askpass="$(mktemp)"
@@ -29,7 +29,7 @@ case "$remote_url" in
 #!/usr/bin/env bash
 case "$1" in
   *Username*) printf '%s\n' 'git' ;;
-  *Password*) printf '%s\n' "$GITEA_MIRROR_SYNC_TOKEN" ;;
+  *Password*) printf '%s\n' "$TRADING_AGENTS_WEB_GITEA_SYNC_TOKEN" ;;
   *) exit 1 ;;
 esac
 ASKPASS

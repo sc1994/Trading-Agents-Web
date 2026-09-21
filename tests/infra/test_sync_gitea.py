@@ -45,7 +45,9 @@ def test_workflow_has_read_only_single_branch_contract() -> None:
     assert "scripts/sync_gitea_main.sh" in run_command
     assert "https://gitea.suncheng.online:81/suncheng/Trading-Agents-Web.git" in run_command
     assert job["steps"][1]["env"] == {
-        "GITEA_MIRROR_SYNC_TOKEN": "${{ secrets.GITEA_MIRROR_SYNC_TOKEN }}"
+        "TRADING_AGENTS_WEB_GITEA_SYNC_TOKEN": (
+            "${{ secrets.TRADING_AGENTS_WEB_GITEA_SYNC_TOKEN }}"
+        )
     }
     script = SCRIPT.read_text(encoding="utf-8")
     assert "HEAD:refs/heads/main" in script
@@ -100,7 +102,7 @@ def test_script_pushes_main_and_rejects_non_fast_forward(tmp_path: Path) -> None
 
 def test_https_mode_fails_before_git_when_token_is_missing(tmp_path: Path) -> None:
     env = os.environ.copy()
-    env.pop("GITEA_MIRROR_SYNC_TOKEN", None)
+    env.pop("TRADING_AGENTS_WEB_GITEA_SYNC_TOKEN", None)
     result = subprocess.run(
         ["bash", str(SCRIPT), "https://gitea.example.invalid/owner/repo.git", "a" * 40],
         cwd=tmp_path,
@@ -109,4 +111,4 @@ def test_https_mode_fails_before_git_when_token_is_missing(tmp_path: Path) -> No
         capture_output=True,
     )
     assert result.returncode != 0
-    assert "GITEA_MIRROR_SYNC_TOKEN is required" in result.stderr
+    assert "TRADING_AGENTS_WEB_GITEA_SYNC_TOKEN is required" in result.stderr

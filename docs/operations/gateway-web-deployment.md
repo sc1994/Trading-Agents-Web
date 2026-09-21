@@ -149,7 +149,7 @@ GitHub `main`，重新读取 GitHub 与 Gitea，固定唯一的 `DEPLOY_SHA`，�
 
   cleanup() {
     git update-ref -d "$FRESH_MAIN_REF" >/dev/null 2>&1 || true
-    unset GITEA_MIRROR_SYNC_TOKEN
+    unset TRADING_AGENTS_WEB_GITEA_SYNC_TOKEN
   }
   trap cleanup EXIT INT TERM
 
@@ -167,11 +167,11 @@ GitHub `main`，重新读取 GitHub 与 Gitea，固定唯一的 `DEPLOY_SHA`，�
   test "$DEPLOY_SHA" = "$GITHUB_MAIN_SHA"
   test "$GITEA_MAIN_SHA" = "$EXPECTED_OLD_SHA"
 
-  test -z "${GITEA_MIRROR_SYNC_TOKEN:-}"
-  IFS= read -r -s -p 'Gitea sync token: ' GITEA_MIRROR_SYNC_TOKEN
+  test -z "${TRADING_AGENTS_WEB_GITEA_SYNC_TOKEN:-}"
+  IFS= read -r -s -p 'Gitea sync token: ' TRADING_AGENTS_WEB_GITEA_SYNC_TOKEN
   printf '\n'
-  test -n "$GITEA_MIRROR_SYNC_TOKEN"
-  export GITEA_MIRROR_SYNC_TOKEN
+  test -n "$TRADING_AGENTS_WEB_GITEA_SYNC_TOKEN"
+  export TRADING_AGENTS_WEB_GITEA_SYNC_TOKEN
 
   bash scripts/initialize_gitea_main.sh "$GITEA_REMOTE" "$DEPLOY_SHA"
 )

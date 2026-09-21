@@ -307,7 +307,7 @@ def test_rejects_test_old_sha_override_for_https(tmp_path: Path) -> None:
     env.update(
         {
             "GITEA_INITIALIZE_TEST_OLD_SHA": "b" * 40,
-            "GITEA_MIRROR_SYNC_TOKEN": "test-token",
+            "TRADING_AGENTS_WEB_GITEA_SYNC_TOKEN": "test-token",
         }
     )
 
@@ -431,7 +431,7 @@ def test_exact_lease_rejects_main_race_after_backup_tag(tmp_path: Path) -> None:
 
 def test_https_requires_sync_token_before_git(tmp_path: Path) -> None:
     env, marker = install_git_call_detector(tmp_path)
-    env.pop("GITEA_MIRROR_SYNC_TOKEN", None)
+    env.pop("TRADING_AGENTS_WEB_GITEA_SYNC_TOKEN", None)
     env.pop("GITEA_INITIALIZE_TEST_OLD_SHA", None)
 
     result = run(
@@ -445,7 +445,7 @@ def test_https_requires_sync_token_before_git(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 4
-    assert "GITEA_MIRROR_SYNC_TOKEN is required" in result.stderr
+    assert "TRADING_AGENTS_WEB_GITEA_SYNC_TOKEN is required" in result.stderr
     assert not marker.exists()
 
 

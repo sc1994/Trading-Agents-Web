@@ -53,7 +53,7 @@
 - Create: `tests/infra/test_initialize_gitea.py`
 
 **Interfaces:**
-- Consumes: 当前 checkout 的 GitHub 提交、`REMOTE_URL`、`EXPECTED_NEW_SHA`；HTTPS 时从 `GITEA_MIRROR_SYNC_TOKEN` 读取凭据。
+- Consumes: 当前 checkout 的 GitHub 提交、`REMOTE_URL`、`EXPECTED_NEW_SHA`；HTTPS 时从 `TRADING_AGENTS_WEB_GITEA_SYNC_TOKEN` 读取凭据。
 - Produces: `bash scripts/initialize_gitea_main.sh REMOTE_URL EXPECTED_NEW_SHA`；成功后远端备份标签 peel 到固定旧 SHA，远端 `main` 等于 `EXPECTED_NEW_SHA`。
 
 - [ ] **Step 1：先写初始化成功的集成测试**
@@ -470,7 +470,7 @@ def test_gitea_workflow_pins_actions_and_exposes_no_secrets() -> None:
     assert PINNED_ACTION.fullmatch(checkout["uses"])
     assert checkout["with"]["persist-credentials"] == "false"
     text = GITEA_WORKFLOW.read_text(encoding="utf-8")
-    for forbidden in ("GITEA_MIRROR_SYNC_TOKEN", "OPENAI_API_KEY", "ALPHA_VANTAGE_API_KEY"):
+    for forbidden in ("TRADING_AGENTS_WEB_GITEA_SYNC_TOKEN", "OPENAI_API_KEY", "ALPHA_VANTAGE_API_KEY"):
         assert forbidden not in text
 ```
 
@@ -686,7 +686,7 @@ bash scripts/initialize_gitea_main.sh \
   "$(git rev-parse HEAD)"
 ```
 
-`GITEA_MIRROR_SYNC_TOKEN` 仅注入当前受控 shell 环境，不写入命令历史、仓库文件或远程 URL。
+`TRADING_AGENTS_WEB_GITEA_SYNC_TOKEN` 仅注入当前受控 shell 环境，不写入命令历史、仓库文件或远程 URL。
 
 Expected: 脚本退出 0；备份标签 peel 到固定旧 SHA；Gitea `main` 等于 GitHub `main`。
 

@@ -80,7 +80,7 @@ def test_gitea_workflow_pins_checkout_and_exposes_no_secrets() -> None:
     }
     command_data = json.dumps(workflow_command_data(workflow), sort_keys=True)
     for forbidden in (
-        "GITEA_MIRROR_SYNC_TOKEN",
+        "TRADING_AGENTS_WEB_GITEA_SYNC_TOKEN",
         "OPENAI_API_KEY",
         "ALPHA_VANTAGE_API_KEY",
     ):
