@@ -1,0 +1,40 @@
+name: Deploy gateway blank web page
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: trading-agents-web-gateway-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: >-
+      ${{ (github.server_url == 'http://suncheng.online:14200' ||
+      github.server_url == 'http://192.168.31.2:14200') &&
+      github.repository == 'suncheng/Trading-Agents-Web' &&
+      github.ref == 'refs/heads/main' }}
+    runs-on: gateway
+    steps:
+      - name: Check out the synchronized commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Build, deploy, and verify
+        env:
+          DEPLOY_SHA: ${{ github.sha }}
+        run: |
+          set -Eeuo pipefail
+          case "$DEPLOY_SHA" in
+            *[!0-9a-f]*|'') exit 2 ;;
+          esac
+          test "${#DEPLOY_SHA}" -eq 40
+          test "$(git rev-parse HEAD)" = "$DEPLOY_SHA"
+          bash scripts/deploy_gateway_web.sh "$DEPLOY_SHA"

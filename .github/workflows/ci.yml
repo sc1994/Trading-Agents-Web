@@ -10,6 +10,124 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  gateway-web-image:
+    name: gateway web image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the candidate commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Build and verify the production candidate
+        timeout-minutes: 10
+        env:
+          IMAGE_REF: trading-agents-web-ui:${{ github.sha }}
+        run: |
+          set -Eeuo pipefail
+
+          readonly candidate_name="gateway-web-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          tmp_dir=$(mktemp -d)
+          readonly tmp_dir
+          candidate_running=false
+
+          cleanup() {
+            local status=$?
+            trap - EXIT INT TERM
+            if [[ "$candidate_running" == true ]]; then
+              docker rm --force "$candidate_name" >/dev/null 2>&1 || true
+            fi
+            rm -rf -- "$tmp_dir"
+            exit "$status"
+          }
+          trap cleanup EXIT INT TERM
+
+          docker build \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --tag "$IMAGE_REF" \
+            --file web/Dockerfile \
+            .
+
+          built_revision=$(
+            docker image inspect \
+              --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' \
+              "$IMAGE_REF"
+          )
+          test "$built_revision" = "$GITHUB_SHA"
+
+          image_user=$(docker image inspect --format '{{ .Config.User }}' "$IMAGE_REF")
+          case "$image_user" in
+            ""|0|0:*|root|root:*)
+              printf 'image must declare a non-root user, got: %s\n' "$image_user" >&2
+              exit 1
+              ;;
+          esac
+
+          docker run \
+            --detach \
+            --rm \
+            --name "$candidate_name" \
+            --read-only \
+            --cap-drop ALL \
+            --security-opt no-new-privileges \
+            --tmpfs /tmp:rw,noexec,nosuid,size=16m \
+            --publish 127.0.0.1::8080 \
+            "$IMAGE_REF" >/dev/null
+          candidate_running=true
+
+          candidate_binding=$(docker port "$candidate_name" 8080/tcp)
+          if [[ ! "$candidate_binding" =~ ^127\.0\.0\.1:([0-9]{1,5})$ ]]; then
+            printf 'candidate received an invalid loopback binding: %s\n' \
+              "$candidate_binding" >&2
+            exit 1
+          fi
+          readonly candidate_url="http://127.0.0.1:${BASH_REMATCH[1]}"
+          readonly health_expected="$tmp_dir/health.expected"
+          readonly health_response="$tmp_dir/health.response"
+          readonly page_response="$tmp_dir/page.response"
+          printf 'ok\n' > "$health_expected"
+
+          candidate_ready=false
+          for attempt in {1..30}; do
+            if curl \
+              --fail \
+              --silent \
+              --show-error \
+              --connect-timeout 2 \
+              --max-time 5 \
+              --output "$health_response" \
+              "${candidate_url}/healthz" && \
+              cmp -s "$health_response" "$health_expected"; then
+              candidate_ready=true
+              break
+            fi
+            sleep 1
+          done
+          if [[ "$candidate_ready" != true ]]; then
+            printf 'candidate did not become ready\n' >&2
+            exit 1
+          fi
+
+          curl \
+            --fail \
+            --silent \
+            --show-error \
+            --connect-timeout 2 \
+            --max-time 5 \
+            --output "$page_response" \
+            "${candidate_url}/"
+          cmp -s "$page_response" web/index.html
+
+          TRADINGAGENTS_WEB_IMAGE="$IMAGE_REF" \
+          TRADINGAGENTS_WEB_REVISION="$GITHUB_SHA" \
+            docker compose --file docker-compose.gateway-web.yml config --quiet
+
+          docker rm --force "$candidate_name" >/dev/null
+          candidate_running=false
+
   test:
     name: tests (py${{ matrix.python-version }})
     runs-on: ubuntu-latest
