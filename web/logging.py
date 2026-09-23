@@ -18,8 +18,13 @@ def redact_logs(redact):
 
     def factory(*args, **kwargs):
         record = previous(*args, **kwargs)
-        record.msg = redact(record.getMessage())
-        record.args = ()
+        if record.name == "uvicorn.access" and isinstance(record.args, tuple) and len(record.args) == 5:
+            # Uvicorn's AccessFormatter needs the five original field types.
+            record.msg = redact(record.msg)
+            record.args = tuple(redact(value) if isinstance(value, str) else value for value in record.args)
+        else:
+            record.msg = redact(record.getMessage())
+            record.args = ()
         if record.exc_info:
             record.exc_text = redact(formatter.formatException(record.exc_info))
             record.exc_info = None

@@ -340,13 +340,19 @@ def test_checkpoint_teardown_error_cannot_leak_credentials(setup_runner, monkeyp
     assert os.environ["OPENAI_API_KEY"] == "original-key"
 
 
+@pytest.mark.parametrize("data_key, encoded_key", [
+    ("secret-data-key", "secret-data-key"),
+    ("secret-data-key+with space", "secret-data-key%2Bwith+space"),
+])
 def test_vendor_http_failure_redacts_service_logs_including_threaded_tracebacks(
-    setup_runner, monkeypatch, caplog
+    setup_runner, monkeypatch, caplog, data_key, encoded_key
 ):
     from tradingagents.dataflows.config import set_config
     from tradingagents.dataflows.interface import route_to_vendor
 
     runner, task, control = setup_runner
+    runner.settings.update({"keys": {"fred": data_key}})
+    control.data_key = data_key
     set_config({"tool_vendors": {"get_macro_indicators": "fred"}})
     original_factory = logging.getLogRecordFactory()
     output = StringIO()
@@ -365,7 +371,7 @@ def test_vendor_http_failure_redacts_service_logs_including_threaded_tracebacks(
     def vendor_failure():
         route_to_vendor("get_macro_indicators", "cpi", "2024-01-02")
         try:
-            raise RuntimeError("Downstream failure secret-data-key")
+            raise RuntimeError(f"Downstream failure {data_key}")
         except RuntimeError:
             logger.exception("Vendor request failed with %s", "secret-run-key")
             raise
@@ -381,7 +387,8 @@ def test_vendor_http_failure_redacts_service_logs_including_threaded_tracebacks(
             runner.run(task, lambda *_: None)
         logs = caplog.text + output.getvalue()
         assert "Vendor" in logs and "503" in logs and "Traceback" in logs
-        assert "secret-data-key" not in logs
+        assert data_key not in logs
+        assert encoded_key not in logs
         assert "secret-run-key" not in logs
         assert "[REDACTED]" in logs
         assert logging.getLogRecordFactory() is original_factory
