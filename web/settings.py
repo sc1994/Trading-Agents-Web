@@ -27,7 +27,7 @@ _FIELDS = {
 
 
 def _masked(value: str | None) -> dict:
-    return {"configured": bool(value), "last4": value[-4:] if value else None}
+    return {"configured": bool(value), "last4": value[-4:] if value and len(value) > 4 else None}
 
 
 def _model_id(provider: str, mode: str, value: object) -> str:

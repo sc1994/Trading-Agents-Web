@@ -43,6 +43,24 @@ def test_environment_key_is_masked_and_never_saved(tmp_path, monkeypatch):
     assert store.get_settings() == {}
 
 
+def test_short_stored_key_is_never_returned_whole(tmp_path, monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    service = SettingsService(Store(tmp_path / "web.db"))
+
+    response = service.update({"keys": {"openai": "abcd"}})
+
+    assert response["keys"]["openai"] == {"configured": True, "last4": None}
+    assert "abcd" not in str(service.public())
+
+
+def test_short_environment_key_is_never_returned_whole(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "abc")
+    service = SettingsService(Store(tmp_path / "web.db"))
+
+    assert service.public()["keys"]["openai"] == {"configured": True, "last4": None}
+    assert "abc" not in str(service.public())
+
+
 @pytest.mark.parametrize(
     "change",
     [
@@ -179,7 +197,17 @@ def test_resolve_run_config_rejects_absent_provider_key(tmp_path, monkeypatch):
         service.resolve_run_config({"provider": "anthropic"})
 
 
-def test_database_and_parent_directory_are_private(tmp_path):
+def test_new_database_directory_and_file_are_private(tmp_path):
+    directory = tmp_path / "dedicated"
+    db_file = directory / "web.db"
+
+    Store(db_file)
+
+    assert directory.stat().st_mode & 0o777 == 0o700
+    assert db_file.stat().st_mode & 0o777 == 0o600
+
+
+def test_existing_insecure_database_directory_is_not_modified(tmp_path):
     directory = tmp_path / "data"
     directory.mkdir(mode=0o755)
     db_file = directory / "web.db"
@@ -187,10 +215,11 @@ def test_database_and_parent_directory_are_private(tmp_path):
     os.chmod(directory, 0o755)
     os.chmod(db_file, 0o644)
 
-    Store(db_file)
+    with pytest.raises(ValueError, match="directory.*private"):
+        Store(db_file)
 
-    assert directory.stat().st_mode & 0o777 == 0o700
-    assert db_file.stat().st_mode & 0o777 == 0o600
+    assert directory.stat().st_mode & 0o777 == 0o755
+    assert db_file.stat().st_mode & 0o777 == 0o644
 
 
 def test_connection_probe_is_bounded_to_provider_endpoint(tmp_path, monkeypatch):

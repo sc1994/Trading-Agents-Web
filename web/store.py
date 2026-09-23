@@ -42,7 +42,8 @@ class Store:
     def __init__(self, path: Path):
         self.path = Path(path)
         self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        os.chmod(self.path.parent, 0o700)
+        if self.path.parent.stat().st_mode & 0o7777 != 0o700:
+            raise ValueError("database directory must be private (0700)")
         flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
         fd = os.open(self.path, flags, 0o600)
         try:
