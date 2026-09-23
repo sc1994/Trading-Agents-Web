@@ -1,6 +1,7 @@
 """Durable task, event, and report storage for the single-process web worker."""
 
 import json
+import os
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -40,6 +41,14 @@ def _json(value: dict) -> str:
 class Store:
     def __init__(self, path: Path):
         self.path = Path(path)
+        self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        os.chmod(self.path.parent, 0o700)
+        flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(self.path, flags, 0o600)
+        try:
+            os.fchmod(fd, 0o600)
+        finally:
+            os.close(fd)
         with self.transaction() as db:
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS tasks (
@@ -231,3 +240,19 @@ class Store:
                 "DELETE FROM tasks WHERE id=? AND status!='running'", (task_id,)
             )
             return cursor.rowcount == 1
+
+    def get_settings(self) -> dict[str, str]:
+        with self.transaction() as db:
+            return {row["key"]: row["value"] for row in db.execute("SELECT key, value FROM settings")}
+
+    def update_settings(self, changes: dict[str, str | None]) -> None:
+        with self.transaction(immediate=True) as db:
+            for key, value in changes.items():
+                if value is None:
+                    db.execute("DELETE FROM settings WHERE key=?", (key,))
+                else:
+                    db.execute(
+                        "INSERT INTO settings (key, value) VALUES (?, ?) "
+                        "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                        (key, value),
+                    )
