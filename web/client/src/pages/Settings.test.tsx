@@ -1,0 +1,80 @@
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { Settings } from "./Settings";
+import { fakeApi, resetApi } from "../test/fixtures";
+
+beforeEach(resetApi);
+
+it("shows only masked key status and omits blank keys on save", async () => {
+  render(<Settings api={fakeApi} />);
+  const input = await screen.findByLabelText("OpenAI API Key");
+  expect(input).toHaveAttribute("type", "password");
+  expect(input).toHaveValue("");
+  expect(screen.getByText(/已配置 · 尾号 abcd/)).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "保存设置" }));
+  await waitFor(() =>
+    expect(fakeApi.saveSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ keys: {}, clear_keys: [] }),
+    ),
+  );
+});
+
+it("sends a replacement only to the server and blanks the password after save", async () => {
+  const localSpy = vi.spyOn(Storage.prototype, "setItem");
+  render(<Settings api={fakeApi} />);
+  const input = await screen.findByLabelText("OpenAI API Key");
+  await userEvent.type(input, "replacement-secret");
+  await userEvent.click(screen.getByRole("button", { name: "保存设置" }));
+  await waitFor(() =>
+    expect(fakeApi.saveSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        keys: { openai: "replacement-secret" },
+        clear_keys: [],
+      }),
+    ),
+  );
+  await waitFor(() => expect(input).toHaveValue(""));
+  expect(localSpy).not.toHaveBeenCalled();
+});
+
+it("sends an explicit clear command only after the clear action and save", async () => {
+  render(<Settings api={fakeApi} />);
+  await userEvent.click(
+    await screen.findByRole("button", { name: "清除 OpenAI 密钥" }),
+  );
+  expect(fakeApi.saveSettings).not.toHaveBeenCalled();
+  await userEvent.click(screen.getByRole("button", { name: "保存设置" }));
+  await waitFor(() =>
+    expect(fakeApi.saveSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ keys: {}, clear_keys: ["openai"] }),
+    ),
+  );
+  expect(
+    await screen.findByText(/服务器仍提供 OpenAI 密钥/),
+  ).toBeInTheDocument();
+});
+
+it("tests only the selected saved provider after explicit user action", async () => {
+  render(<Settings api={fakeApi} />);
+  await screen.findByLabelText("OpenAI API Key");
+  expect(fakeApi.testConnection).not.toHaveBeenCalled();
+  await userEvent.click(
+    screen.getByRole("button", { name: "测试 OpenAI 连接" }),
+  );
+  await waitFor(() =>
+    expect(fakeApi.testConnection).toHaveBeenCalledWith("openai"),
+  );
+  expect(await screen.findByText("OpenAI 连接成功")).toBeInTheDocument();
+});
+
+it("keeps edits available when save fails and displays a safe error", async () => {
+  vi.mocked(fakeApi.saveSettings).mockRejectedValue(
+    new Error("request failed"),
+  );
+  render(<Settings api={fakeApi} />);
+  const input = await screen.findByLabelText("OpenAI API Key");
+  await userEvent.type(input, "new-key");
+  await userEvent.click(screen.getByRole("button", { name: "保存设置" }));
+  expect(await screen.findByText(/保存失败/)).toBeInTheDocument();
+  expect(input).toHaveValue("new-key");
+});

@@ -1,0 +1,61 @@
+import { vi } from "vitest";
+import type { SettingsView, TaskView, WebApi } from "../api";
+
+export const settings: SettingsView = {
+  provider: "openai",
+  quick_model: "gpt-5.6-luna",
+  deep_model: "gpt-5.6",
+  language: "简体中文",
+  checkpoint_enabled: true,
+  keys: {
+    openai: { configured: true, last4: "abcd" },
+    google: { configured: false, last4: null },
+    fred: { configured: false, last4: null },
+  },
+};
+export const task: TaskView = {
+  id: "task-123",
+  params: { ticker: "NVDA", date: "2026-09-22" },
+  ticker: "NVDA",
+  name: "NVIDIA Corporation",
+  date: "2026-09-22",
+  status: "queued",
+  current_stage: null,
+  current_node: null,
+  rating: null,
+  decision: null,
+  error: null,
+  created_at: "2026-09-22T08:00:00Z",
+  updated_at: "2026-09-22T08:00:00Z",
+  started_at: null,
+  finished_at: null,
+  sections: {},
+  can_resume: false,
+};
+export const fakeApi: WebApi = {
+  searchSymbols: vi.fn(),
+  createTask: vi.fn(),
+  getSettings: vi.fn(),
+  saveSettings: vi.fn(),
+  testConnection: vi.fn(),
+};
+export const navigate = vi.fn();
+export function resetApi() {
+  Object.values(fakeApi).forEach((method) => vi.mocked(method).mockReset());
+  navigate.mockReset();
+  vi.mocked(fakeApi.getSettings).mockResolvedValue(structuredClone(settings));
+  vi.mocked(fakeApi.saveSettings).mockResolvedValue(structuredClone(settings));
+  vi.mocked(fakeApi.searchSymbols).mockResolvedValue({
+    results: [
+      {
+        symbol: "NVDA",
+        name: "NVIDIA Corporation",
+        exchange: "NASDAQ",
+        type: "EQUITY",
+      },
+    ],
+    unavailable: false,
+  });
+  vi.mocked(fakeApi.createTask).mockResolvedValue(structuredClone(task));
+  vi.mocked(fakeApi.testConnection).mockResolvedValue({ ok: true });
+}
