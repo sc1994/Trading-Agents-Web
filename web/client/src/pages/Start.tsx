@@ -229,8 +229,14 @@ export function Start({
                         );
                         if (
                           !selected &&
-                          (!validTicker(text) || (companyMatch && !manual))
+                          !manual &&
+                          validTicker(text) &&
+                          (/^[A-Za-z]{2,}$/.test(text) || companyMatch)
                         )
+                          throw new Error(
+                            "请选择搜索结果或确认按代码手动输入。",
+                          );
+                        if (!selected && !validTicker(text))
                           throw new Error(
                             "请选择搜索结果或输入有效代码，例如 NVDA、0700.HK。",
                           );
@@ -300,13 +306,17 @@ export function Start({
                     { required: true, message: "请选择分析日期" },
                     {
                       validator: async (_, value) => {
+                        const [year, month, day] = String(value ?? "")
+                          .split("-")
+                          .map(Number);
+                        const calendar = new Date(`${value}T00:00:00Z`);
                         if (
                           !/^\d{4}-\d{2}-\d{2}$/.test(value ?? "") ||
                           value > today() ||
-                          Number.isNaN(Date.parse(value)) ||
-                          new Date(`${value}T12:00:00`)
-                            .toISOString()
-                            .slice(0, 10) !== value
+                          year < 1 ||
+                          calendar.getUTCFullYear() !== year ||
+                          calendar.getUTCMonth() + 1 !== month ||
+                          calendar.getUTCDate() !== day
                         )
                           throw new Error("请选择不晚于今天的有效日期");
                       },
@@ -316,18 +326,16 @@ export function Start({
                   <Input type="date" max={today()} />
                 </Form.Item>
               </div>
-              {!selected &&
-                (results.length > 0 || searchState === "loading") &&
-                validTicker(query) && (
-                  <div className="manual-option">
-                    <Checkbox
-                      checked={manual}
-                      onChange={(event) => setManual(event.target.checked)}
-                    >
-                      将「{query.toUpperCase()}」作为代码手动输入
-                    </Checkbox>
-                  </div>
-                )}
+              {!selected && validTicker(query) && (
+                <div className="manual-option">
+                  <Checkbox
+                    checked={manual}
+                    onChange={(event) => setManual(event.target.checked)}
+                  >
+                    将「{query.toUpperCase()}」作为代码手动输入
+                  </Checkbox>
+                </div>
+              )}
               <Form.Item name="depth" label="分析深度">
                 <Segmented
                   block

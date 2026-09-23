@@ -90,6 +90,57 @@ it("allows a manually entered valid ticker when search is unavailable", async ()
   );
 });
 
+it.each([
+  { state: "unavailable", unavailable: true, status: /搜索暂不可用/ },
+  { state: "empty", unavailable: false, status: /未找到结果/ },
+])(
+  "requires manual confirmation for an unselected company-like query after $state search",
+  async ({ unavailable, status }) => {
+    vi.mocked(fakeApi.searchSymbols).mockResolvedValue({
+      results: [],
+      unavailable,
+    });
+    render(<Start api={fakeApi} navigate={navigate} />);
+    fireEvent.change(await screen.findByLabelText("股票 / 资产代码"), {
+      target: { value: "NVIDIA" },
+    });
+    await screen.findByText(status);
+    await userEvent.click(screen.getByRole("button", { name: "开始分析" }));
+    expect(
+      await screen.findByText(/请选择搜索结果或确认按代码手动输入/),
+    ).toBeInTheDocument();
+    expect(fakeApi.createTask).not.toHaveBeenCalled();
+    await userEvent.click(
+      screen.getByRole("checkbox", { name: "将「NVIDIA」作为代码手动输入" }),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "开始分析" }));
+    await waitFor(() =>
+      expect(fakeApi.createTask).toHaveBeenCalledWith(
+        expect.objectContaining({ ticker: "NVIDIA", name: "" }),
+      ),
+    );
+  },
+);
+
+it.each(["2026-01-15", "2024-02-29"])(
+  "accepts the valid calendar date %s without timezone shifts",
+  async (date) => {
+    render(<Start api={fakeApi} navigate={navigate} />);
+    fireEvent.change(await screen.findByLabelText("股票 / 资产代码"), {
+      target: { value: "F" },
+    });
+    fireEvent.change(screen.getByLabelText("分析日期"), {
+      target: { value: date },
+    });
+    await userEvent.click(screen.getByRole("button", { name: "开始分析" }));
+    await waitFor(() =>
+      expect(fakeApi.createTask).toHaveBeenCalledWith(
+        expect.objectContaining({ ticker: "F", date }),
+      ),
+    );
+  },
+);
+
 it("rejects unselected company names instead of treating them as ticker symbols", async () => {
   render(<Start api={fakeApi} navigate={navigate} />);
   fireEvent.change(await screen.findByLabelText("股票 / 资产代码"), {
