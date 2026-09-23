@@ -1,37 +1,128 @@
+"""Single-process FastAPI/Uvicorn entrypoint for the private research workbench."""
+
 import os
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import re
+from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlsplit
 
-INDEX = Path(__file__).with_name("index.html").read_bytes()
-HEALTH = b"ok\n"
-NOT_FOUND = b"not found\n"
+import uvicorn
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
+
+from web.api import router
+from web.runner import GraphRunner
+from web.settings import SettingsService
+from web.store import Store
+from web.worker import TaskWorker
+
+STATIC_DIR = Path(__file__).parent / "client" / "dist"
+_FALLBACK_INDEX = Path(__file__).with_name("index.html")
 
 
-class GatewayRequestHandler(BaseHTTPRequestHandler):
-    def do_GET(self) -> None:  # noqa: N802
-        self._respond(send_body=True)
+def _origin(value: str):
+    try:
+        parsed = urlsplit(value)
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.username
+            or parsed.password
+        ):
+            return None
+        if parsed.path or parsed.query or parsed.fragment:
+            return None
+        return (
+            parsed.scheme,
+            parsed.hostname,
+            parsed.port or (443 if parsed.scheme == "https" else 80),
+        )
+    except ValueError:
+        return None
 
-    def do_HEAD(self) -> None:  # noqa: N802
-        self._respond(send_body=False)
 
-    def _respond(self, *, send_body: bool) -> None:
-        path = urlsplit(self.path).path
-        if path in {"/", "/index.html"}:
-            status, body, content_type = 200, INDEX, "text/html; charset=utf-8"
-        elif path == "/healthz":
-            status, body, content_type = 200, HEALTH, "text/plain; charset=utf-8"
-        else:
-            status, body, content_type = 404, NOT_FOUND, "text/plain; charset=utf-8"
+def create_app(data_dir: Path | None = None, executor: GraphRunner | None = None) -> FastAPI:
+    @asynccontextmanager
+    async def lifespan(app):
+        directory = Path(
+            data_dir or os.environ.get("TRADINGAGENTS_WEB_DATA_DIR", "data/web")
+        ).resolve()
+        store = Store(directory / "web.db")
+        settings = SettingsService(store)
+        runner = executor if executor is not None else GraphRunner(settings, directory)
+        worker = TaskWorker(store, runner)
+        app.state.data_dir = directory
+        app.state.store = store
+        app.state.settings = settings
+        app.state.runner = runner
+        app.state.worker = worker
+        await run_in_threadpool(worker.start)
+        try:
+            yield
+        finally:
+            await run_in_threadpool(worker.stop)
 
-        self.send_response(status)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.end_headers()
-        if send_body:
-            self.wfile.write(body)
+    app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+
+    @app.middleware("http")
+    async def security(request: Request, call_next):
+        response = None
+        if request.method not in {"GET", "HEAD", "OPTIONS"}:
+            origin = request.headers.get("origin")
+            expected = _origin(f"{request.url.scheme}://{request.url.netloc}")
+            if request.headers.get("sec-fetch-site") == "cross-site" or (
+                origin is not None and (_origin(origin) is None or _origin(origin) != expected)
+            ):
+                response = JSONResponse(
+                    {"detail": "Cross-origin writes are forbidden"}, status_code=403
+                )
+        if response is None:
+            response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers.setdefault("Cache-Control", "no-store")
+        return response
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error(request, error):
+        # Pydantic's default errors include raw input, including invalid API keys.
+        details = [
+            {"loc": item["loc"], "msg": item["msg"], "type": item["type"]}
+            for item in error.errors()
+        ]
+        return JSONResponse({"detail": details}, status_code=422)
+
+    @app.api_route("/healthz", methods=["GET", "HEAD"])
+    def health():
+        return PlainTextResponse("ok\n")
+
+    app.include_router(router)
+
+    @app.api_route("/{path:path}", methods=["GET", "HEAD"])
+    def static_app(path: str):
+        root = STATIC_DIR.resolve()
+        if path.startswith("assets/"):
+            candidate = (root / path).resolve()
+            if not candidate.is_relative_to(root) or not candidate.is_file():
+                raise HTTPException(404, "Not found")
+            headers = {}
+            if re.search(r"-[A-Za-z0-9_-]{8,}\.[^.]+$", candidate.name):
+                headers["Cache-Control"] = "public, max-age=31536000, immutable"
+            return FileResponse(candidate, headers=headers)
+        if path not in {"", "index.html", "history", "settings", "tasks"} and not (
+            path.startswith("tasks/")
+            and all(part not in {"", ".", ".."} for part in path.split("/"))
+        ):
+            raise HTTPException(404, "Not found")
+        index = root / "index.html"
+        if not index.is_file():
+            index = _FALLBACK_INDEX
+        if not index.resolve().is_relative_to(root) and index != _FALLBACK_INDEX:
+            raise HTTPException(404, "Not found")
+        return FileResponse(index, media_type="text/html")
+
+    return app
 
 
 def _port_from_environment() -> int:
@@ -45,20 +136,10 @@ def _port_from_environment() -> int:
     return port
 
 
-def create_server(host: str | None = None, port: int | None = None) -> ThreadingHTTPServer:
-    selected_host = os.environ.get("WEB_HOST", "0.0.0.0") if host is None else host
-    if port is None:
-        selected_port = _port_from_environment()
-    elif port == 0 or 1 <= port <= 65535:
-        selected_port = port
-    else:
-        raise ValueError("port must be 0 or from 1 through 65535")
-    return ThreadingHTTPServer((selected_host, selected_port), GatewayRequestHandler)
+app = create_app()
 
 
 if __name__ == "__main__":
-    server = create_server()
-    try:
-        server.serve_forever()
-    finally:
-        server.server_close()
+    uvicorn.run(
+        app, host=os.environ.get("WEB_HOST", "0.0.0.0"), port=_port_from_environment(), workers=1
+    )
