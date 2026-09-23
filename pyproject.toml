@@ -9,6 +9,8 @@ description = "TradingAgents: Multi-Agents LLM Financial Trading Framework"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn>=0.30.6",
     "langchain-core>=0.3.81",
     "backtrader>=1.9.78.123",
     "langchain-anthropic>=0.3.15",
@@ -35,6 +37,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+    "httpx>=0.28.1",
     "ruff>=0.15",
     "pytest>=8.0",
     "pytest-subtests>=0.13",
@@ -50,7 +53,7 @@ bedrock = [
 tradingagents = "cli.main:app"
 
 [tool.setuptools.packages.find]
-include = ["tradingagents*", "cli*"]
+include = ["tradingagents*", "cli*", "web*"]
 
 [tool.setuptools.package-data]
 cli = ["static/*"]
