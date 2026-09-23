@@ -111,7 +111,7 @@ def create_app(data_dir: Path | None = None, executor: GraphRunner | None = None
                 headers["Cache-Control"] = "public, max-age=31536000, immutable"
             return FileResponse(candidate, headers=headers)
         if path not in {"", "index.html", "history", "settings", "tasks"} and not (
-            path.startswith("tasks/")
+            path.startswith(("tasks/", "reports/"))
             and all(part not in {"", ".", ".."} for part in path.split("/"))
         ):
             raise HTTPException(404, "Not found")

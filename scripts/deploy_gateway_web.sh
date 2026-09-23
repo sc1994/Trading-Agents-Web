@@ -53,7 +53,7 @@ cleanup() {
     local status=$?
     trap - EXIT INT TERM
     if [[ "$candidate_running" == true ]]; then
-        docker rm --force "$candidate_name" >/dev/null 2>&1 || true
+        docker rm --force --volumes "$candidate_name" >/dev/null 2>&1 || true
     fi
     if [[ -n "$tmp_dir" ]]; then
         rm -rf -- "$tmp_dir"
@@ -178,7 +178,7 @@ verify_live_service() {
         "$tmp_dir/live-health.response" || return $?
     fetch_exact \
         "http://127.0.0.1:${host_port}/" \
-        "web/index.html" \
+        "$page_expected" \
         "$tmp_dir/live-index.response"
 }
 
@@ -267,6 +267,12 @@ tmp_dir=$(mktemp -d)
 readonly tmp_dir
 health_expected="$tmp_dir/health.expected"
 printf 'ok\n' > "$health_expected"
+page_expected="$tmp_dir/candidate-index.expected"
+if [[ -n "$old_container_id" ]]; then
+    # Preserve the exact rollback page, including pre-workbench images.
+    docker cp "${old_container_id}:/app/web/client/dist/index.html" "$tmp_dir/old-index.expected" 2>/dev/null || \
+        docker cp "${old_container_id}:/app/index.html" "$tmp_dir/old-index.expected"
+fi
 
 docker run \
     --detach \
@@ -276,9 +282,11 @@ docker run \
     --cap-drop ALL \
     --security-opt no-new-privileges \
     --tmpfs /tmp:rw,noexec,nosuid,size=16m \
+    --volume /var/lib/tradingagents-web \
     --publish 127.0.0.1::8080 \
     "$image_ref" >/dev/null
 candidate_running=true
+docker cp "${candidate_name}:/app/web/client/dist/index.html" "$page_expected"
 
 candidate_binding=$(docker port "$candidate_name" 8080/tcp)
 if [[ ! "$candidate_binding" =~ ^127\.0\.0\.1:([0-9]{1,5})$ ]]; then
@@ -297,10 +305,10 @@ wait_for_candidate_ready \
     "$tmp_dir/candidate-health.response"
 fetch_exact \
     "http://127.0.0.1:${candidate_port}/" \
-    "web/index.html" \
+    "$page_expected" \
     "$tmp_dir/candidate-index.response"
 
-docker rm --force "$candidate_name" >/dev/null
+docker rm --force --volumes "$candidate_name" >/dev/null
 candidate_running=false
 
 restore_previous_state() {
@@ -308,6 +316,7 @@ restore_previous_state() {
     if [[ -n "$old_image" ]]; then
         export TRADINGAGENTS_WEB_IMAGE="$old_image"
         export TRADINGAGENTS_WEB_REVISION="$old_revision"
+        page_expected="$tmp_dir/old-index.expected"
         if ! compose up --detach --no-build web; then
             printf 'failed to restore previous Compose web image: %s\n' "$old_image" >&2
             rollback_failed=true

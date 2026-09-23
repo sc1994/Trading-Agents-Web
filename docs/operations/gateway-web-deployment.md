@@ -1,4 +1,71 @@
-# 网关 Web 首次上线运维手册
+# 网关 Web 研究工作台运维手册
+
+## 研究工作台适用边界（优先于下方历史首次上线流程）
+
+当前版本包含研究任务与服务器端凭据，**仅适用于受信任私有网络的单用户访问**。
+下方记录的公开域名属于旧空白页上线背景，不能作为工作台公开上线的授权或验收目标。
+回环绑定不能阻止既有公开反向代理访问；发布前必须由获授权的维护者确认入口已限制为
+私有网络。若旧公开代理仍可访问，停止发布并安排单独审核的入口保护变更。
+本次代码打包、CI 和本地验收均不授权 SSH、网关变更或实际生产部署。
+
+镜像是 Node 22 构建 React + Python 3.12 运行时，缺少构建后的 `dist/index.html`
+会导致构建失败。只启动一个 Uvicorn worker，UID/GID 固定为 `10001:10001`，
+不可扩为多个 worker/副本。Compose 保留只读根目录、cap-drop、no-new-privileges、
+16 MiB `/tmp` 与 `127.0.0.1:7681:8080`。构建和健康检查不读取模型密钥；
+生产凭据在私有入口的设置页配置，不加入构建参数、CI 环境或镜像。
+
+### 持久卷、属主与首次迁移
+
+Compose 项目 `trading-agents-web` 的逻辑卷 `web-data` 默认命名为
+`trading-agents-web_web-data`，挂载 `/var/lib/tradingagents-web`（读写）。
+`TRADINGAGENTS_WEB_DATA_DIR` 在镜像中固定为该路径。先用 Compose 配置与容器 Mounts
+核对实际卷名，不能以目录或工作树名称猜测。新空卷由 Docker 从镜像目录初始化，
+应继承 `10001:10001` 与 `0700`；已有卷不会自动修正属主。
+
+完整备份范围包括 `web.db` 及其 SQLite sidecar、`reports/`、`cache/`（含
+`cache/checkpoints/*.db`）、`memory/`，以及 `private/checkpoint-bindings/`
+中的签名密钥和任务归属记录。遗漏 `private/` 会使原检查点无法安全恢复。
+这些目录可能在首次运行后才创建。运行时可创建文件，不能写镜像根目录。
+
+从旧空白页升级没有 Web 任务数据可迁移；先创建并核验新卷即可。
+若需从开发目录或其他版本导入已有工作台数据：在独立维护授权下停止本服务写入，
+先备份原数据，再将完整内容恢复到**新建的专用卷**，仅对该已确认的卷内目录修正
+属主为 `10001:10001`，根目录权限为 `0700`。不要更改宿主机宽泛目录、其他服务卷，
+也不要让应用长期以 root 运行。确认所有 SQLite 文件和报告/记忆/检查点目录均可由
+UID 10001 读写后，再安排切换；原卷保留用于恢复。
+
+### 一致备份与恢复演练
+
+以下为维护流程，**需要独立的维护窗口授权，不在本次打包任务中执行**：
+
+1. 记录当前不可变镜像 SHA/ID、实际卷名、备份时间与权限。停止本服务并确认没有
+   worker/副本写入；不要仅复制运行中的 `web.db`，以免遗漏 WAL 或与检查点不一致。
+2. 用该镜像的 UID 10001，将已确认卷只读挂载到隔离容器，运行
+   `tar -C /var/lib/tradingagents-web -czf - .`，将标准输出保存到权限 `0600`
+   的受控备份文件（先设 `umask 077`）。备份包含所有隐藏文件和上述完整目录。
+   备份与密钥同等敏感，限制访问并在存储/传输层加密，不打印内容到日志。
+3. 校验归档与校验和，恢复演练只使用新建的空白专用卷。以 UID 10001 解压可信归档
+   （`tar --no-same-owner -xzf ...`），不覆盖当前卷。检查根目录 UID/GID/权限，
+   并对 `web.db` 与每个 `cache/checkpoints/*.db` 执行 SQLite
+   `PRAGMA integrity_check`，结果必须为 `ok`；核对 reports、memory、private 和
+   checkpoint 文件清单/校验和与备份一致。
+4. 用相同镜像 SHA、恢复卷和独立回环端口验证健康、历史、报告正文/导出、设置掩码
+   与可恢复任务归属。恢复的排队任务会自动执行，必须在阻断外网的隔离环境演练，
+   或使用无排队任务的预备演练快照；不得让演练触发付费模型/真实数据请求。
+5. 清理的仅是本次明确命名的演练容器/卷。保留原卷与备份，记录恢复耗时与结果。
+
+### 升级与回退
+
+升级前备份整个卷，确认磁盘空间、UID/GID 和私有入口，检查版本是否包含数据库迁移。
+当前存储初始化使用兼容的建表逻辑，不自动转换旧 CLI 数据。仍由已审查的同步/部署
+工作流发布完整 SHA；候选使用独立临时卷，绝不挂载生产卷，删除候选时同时删除临时卷。
+部署脚本从候选镜像提取编译后的 HTML 做逐字节校验，并保留旧容器 HTML 供回退验证，
+兼容旧空白页路径。CI 另验证包导入、非 root、数据目录可写、SQLite 完整性和无密钥 API。
+
+脚本的自动回退只恢复镜像，不恢复或删除持久卷。若将来升级包含不向后兼容的数据迁移，
+不得依赖自动镜像回退：需单独审核迁移方案，停写后将升级前完整备份恢复到新卷，
+使用对应旧 SHA 验证后再安排切换。禁止 `docker compose down --volumes` 和全局 prune。
+健康检查不证明真实模型/行情连接可用；连接测试须由用户在设置页显式触发。
 
 本手册是 `Trading-Agents-Web` 网关 Web 的首次上线边界。GitHub
 `sc1994/Trading-Agents-Web` 的 `main` 是唯一权威源；Gitea
@@ -220,7 +287,7 @@ test "$GITEA_MAIN_SHA" = "$DEPLOY_SHA"
 
 若工作流排队未被该 Runner 接收、失败、目标 SHA 不同，或无法确认任一项，停止并联系 Multica 小队成员。失败调查仅收集该工作流和本服务的只读证据；不得手工启动历史 Stack、修改 Nginx Proxy Manager、删除镜像或操作无关容器。
 
-## 阶段 5：Docker、回环与公开入口验收
+## 阶段 5：Docker 与回环验收
 
 仅在首次工作流显示成功后，于网关 checkout 中执行。此代码块只读取 Docker 状态和发起 HTTP GET；临时目录在退出时移除。
 
@@ -258,28 +325,27 @@ test "$HEALTH_STATUS" = healthy
 
 RESULT_DIR="$(mktemp -d)"
 trap 'rm -rf -- "$RESULT_DIR"' EXIT
+docker cp "${WEB_CONTAINER_ID}:/app/web/client/dist/index.html" "$RESULT_DIR/image-index.html"
 curl --fail --silent --show-error --connect-timeout 2 --max-time 5 \
   --output "$RESULT_DIR/local-health" http://127.0.0.1:7681/healthz
 printf 'ok\n' | cmp -s - "$RESULT_DIR/local-health"
 curl --fail --silent --show-error --connect-timeout 2 --max-time 5 \
   --output "$RESULT_DIR/local-page" http://127.0.0.1:7681/
-cmp -s "$RESULT_DIR/local-page" web/index.html
-curl --fail --silent --show-error --connect-timeout 2 --max-time 10 \
-  --output "$RESULT_DIR/public-page" https://trading.suncheng.online/
-cmp -s "$RESULT_DIR/public-page" web/index.html
+cmp -s "$RESULT_DIR/local-page" "$RESULT_DIR/image-index.html"
 )
 ```
 
 成功条件是恰有一个健康的 `trading-agents-web` / `web` 容器，其镜像名、容器
 revision 和镜像 revision 都等于 `DEPLOY_SHA`；本机 `/healthz` 精确为 `ok` 加换行，
-本机和公开根页面均与 `web/index.html` 字节相同。
+本机根页面与运行镜像中的 `web/client/dist/index.html` 字节相同。
+私有网络入口另由获授权维护者验证，不能复用旧空白页的公开入口验收。
 
 自动回退仅发生在 workflow 内部署脚本的切换或切换后验证失败时：存在旧镜像则尝试
 恢复旧镜像，首次失败则尝试停止失败服务，具体结果以该次失败工作流的证据为准。
 阶段 5 在 workflow 已成功结束后独立执行，此时的 Docker 或回环验收失败**不会触发
 自动回退，也不能据此声称已尝试回退**。应停止并联系 Multica 小队成员，保留当前状态，
 仅收集本服务的只读证据进行人工调查；不要在现场切换或清理。
-若本机通过但公开页面失败，保留健康回环服务，停止并联系 Multica 小队成员，将其作为
+若本机通过但私有入口页面失败，保留健康回环服务，停止并联系 Multica 小队成员，将其作为
 代理入口问题处理；不得修改 Nginx Proxy Manager。
 
 ## 阶段 6：证据记录与后续普通同步
@@ -292,7 +358,7 @@ revision 和镜像 revision 都等于 `DEPLOY_SHA`；本机 `/healthz` 精确为
   `concurrency` / `permissions` 行为验证证据和门禁核验结论
 - 首次 Gitea workflow URL、运行 ID、结果、目标 SHA 和 Runner 名称
 - 容器 ID、镜像 ID、镜像名、两个 revision 值、健康状态
-- 本机 `/healthz`、本机页面和公开页面的验收时间与结果
+- 本机 `/healthz`、本机页面和私有入口页面的验收时间与结果
 - 执行人、变更单号，以及任何停止条件的原始非敏感输出
 
 首次初始化完成后，后续只允许 GitHub `main` 通过

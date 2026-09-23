@@ -38,7 +38,7 @@ jobs:
             local status=$?
             trap - EXIT INT TERM
             if [[ "$candidate_running" == true ]]; then
-              docker rm --force "$candidate_name" >/dev/null 2>&1 || true
+              docker rm --force --volumes "$candidate_name" >/dev/null 2>&1 || true
             fi
             rm -rf -- "$tmp_dir"
             exit "$status"
@@ -74,9 +74,11 @@ jobs:
             --cap-drop ALL \
             --security-opt no-new-privileges \
             --tmpfs /tmp:rw,noexec,nosuid,size=16m \
+            --volume /var/lib/tradingagents-web \
             --publish 127.0.0.1::8080 \
             "$IMAGE_REF" >/dev/null
           candidate_running=true
+          docker cp "${candidate_name}:/app/web/client/dist/index.html" "$tmp_dir/index.expected"
 
           candidate_binding=$(docker port "$candidate_name" 8080/tcp)
           if [[ ! "$candidate_binding" =~ ^127\.0\.0\.1:([0-9]{1,5})$ ]]; then
@@ -119,13 +121,39 @@ jobs:
             --max-time 5 \
             --output "$page_response" \
             "${candidate_url}/"
-          cmp -s "$page_response" web/index.html
+          cmp -s "$page_response" "$tmp_dir/index.expected"
+
+          # Runs inside the actual non-root, read-only image with no application keys.
+          docker exec "$candidate_name" python -c '
+          import json, os, pathlib, sqlite3, urllib.request, urllib.error
+          import tradingagents, cli.main
+          from tradingagents.graph.trading_graph import TradingAgentsGraph
+          assert os.getuid() == 10001
+          root = pathlib.Path(os.environ["TRADINGAGENTS_WEB_DATA_DIR"])
+          for name in ("cache/checkpoints", "reports", "memory", "private/checkpoint-bindings"):
+              directory = root / name
+              directory.mkdir(parents=True, exist_ok=True)
+              probe = directory / "smoke"
+              probe.write_text("writable")
+              probe.unlink()
+          with sqlite3.connect(root / "web.db") as db:
+              assert db.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+          base = "http://127.0.0.1:8080"
+          assert json.load(urllib.request.urlopen(base + "/api/tasks")) == {"tasks": []}
+          request = urllib.request.Request(base + "/api/tasks", data=b"{}", headers={"Content-Type": "application/json"})
+          try:
+              urllib.request.urlopen(request)
+          except urllib.error.HTTPError as error:
+              assert error.code == 422
+          else:
+              raise AssertionError("invalid task accepted")
+          print("non-root application imports, persistent storage and no-key API smoke passed")'
 
           TRADINGAGENTS_WEB_IMAGE="$IMAGE_REF" \
           TRADINGAGENTS_WEB_REVISION="$GITHUB_SHA" \
             docker compose --file docker-compose.gateway-web.yml config --quiet
 
-          docker rm --force "$candidate_name" >/dev/null
+          docker rm --force --volumes "$candidate_name" >/dev/null
           candidate_running=false
 
   test:

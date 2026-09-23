@@ -4,6 +4,27 @@
 
 This repository retains the repository owner's Trading-Agents-Web bootstrap content above and the complete TauricResearch/TradingAgents v0.4.0 README below. See [UPSTREAM.md](UPSTREAM.md) for the imported release identity, Apache-2.0 license, and manual upstream review process.
 
+## Private research workbench
+
+The Web workbench provides asset search, queued analyses, live progress, saved reports,
+history and masked credential settings on desktop and mobile. It does not place trades.
+Use it only through a trusted private network: the application has no login. Do not expose
+the existing gateway/proxy publicly without a separately reviewed authentication and TLS design.
+
+`web/Dockerfile` builds the React client and Python 3.12 application into one non-root,
+single-worker image. No model keys are required to build, start, or pass health checks.
+The gateway Compose service retains `127.0.0.1:7681` and stores SQLite, reports, checkpoints,
+memory and checkpoint ownership metadata in its `web-data` named volume at
+`/var/lib/tradingagents-web`. Enter provider credentials in Settings after private access
+is established; stored keys and backups remain sensitive plaintext server data.
+
+For local development, install `.[dev]`, run `npm --prefix web/client ci` and
+`npm --prefix web/client run build`, then run `python -m web.server` (port 8080).
+Set `TRADINGAGENTS_WEB_DATA_DIR` to a private writable directory; never run multiple workers
+or replicas against it. See the [deployment and recovery runbook](docs/operations/gateway-web-deployment.md)
+for release gates, volume ownership, backup/restore and upgrades. This documentation does
+not authorize a production deployment.
+
 ---
 
 <p align="center">

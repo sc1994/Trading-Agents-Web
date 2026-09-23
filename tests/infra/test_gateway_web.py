@@ -10,7 +10,7 @@ def client(tmp_path):
         yield client
 
 
-@pytest.mark.parametrize("path", ["/", "/index.html", "/tasks/example", "/settings", "/history"])
+@pytest.mark.parametrize("path", ["/", "/index.html", "/tasks/example", "/reports/example", "/settings", "/history"])
 def test_spa_routes_return_html_with_security_headers(client, path):
     response = client.get(path)
     assert response.status_code == 200
@@ -25,10 +25,14 @@ def test_healthz_returns_exact_body_and_head(client):
     assert response.status_code == 200
     assert response.content == b"ok\n"
     assert response.headers["content-length"] == "3"
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["x-content-type-options"] == "nosniff"
     head = client.head("/healthz")
     assert head.status_code == 200
     assert head.content == b""
     assert head.headers["content-length"] == "3"
+    assert head.headers["cache-control"] == "no-store"
+    assert head.headers["x-content-type-options"] == "nosniff"
 
 
 def test_head_returns_same_spa_headers_without_body(client):
@@ -36,6 +40,8 @@ def test_head_returns_same_spa_headers_without_body(client):
     assert response.status_code == 200
     assert response.headers["content-length"] == client.get("/").headers["content-length"]
     assert response.content == b""
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["x-content-type-options"] == "nosniff"
 
 
 @pytest.mark.parametrize(

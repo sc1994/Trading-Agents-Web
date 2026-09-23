@@ -166,7 +166,7 @@ def test_github_ci_runs_the_candidate_with_production_security_constraints() -> 
     assert '"${candidate_url}/healthz"' in run
     assert '"${candidate_url}/"' in run
     assert 'cmp -s "$health_response" "$health_expected"' in run
-    assert 'cmp -s "$page_response" web/index.html' in run
+    assert 'cmp -s "$page_response" "$tmp_dir/index.expected"' in run
 
 
 def test_github_ci_candidate_check_is_bounded_and_always_cleaned_up() -> None:
@@ -175,7 +175,7 @@ def test_github_ci_candidate_check_is_bounded_and_always_cleaned_up() -> None:
 
     assert verify["timeout-minutes"] == "10"
     assert "trap cleanup EXIT INT TERM" in run
-    assert 'docker rm --force "$candidate_name"' in run
+    assert 'docker rm --force --volumes "$candidate_name"' in run
     assert "for attempt in {1..30}" in run
     assert "--connect-timeout 2" in run
     assert "--max-time 5" in run
@@ -205,8 +205,31 @@ def test_compose_binds_only_fixed_loopback_port_and_has_no_secrets() -> None:
     assert service["tmpfs"] == ["/tmp:rw,noexec,nosuid,size=16m"]
     assert "env_file" not in service
     assert "environment" not in service
-    assert "volumes" not in service
     assert "/healthz" in " ".join(service["healthcheck"]["test"])
+
+
+def test_compose_keeps_all_workbench_state_in_a_writable_named_volume() -> None:
+    compose = load_yaml(COMPOSE)
+    assert compose["services"]["web"]["volumes"] == [
+        "web-data:/var/lib/tradingagents-web:rw"
+    ]
+    assert "web-data" in compose["volumes"]
+
+
+def test_image_packages_the_built_client_and_single_worker_python_runtime() -> None:
+    recipe = (ROOT / "web/Dockerfile").read_text()
+    assert "FROM node:22-alpine AS ui" in recipe
+    assert "npm ci" in recipe
+    assert "npm run build && test -s dist/index.html" in recipe
+    assert "FROM python:3.12-slim" in recipe
+    assert "COPY tradingagents ./tradingagents" in recipe
+    assert "pip install --no-cache-dir ." in recipe
+    assert "COPY --from=ui /src/web/client/dist ./web/client/dist" in recipe
+    assert "TRADINGAGENTS_WEB_DATA_DIR=/var/lib/tradingagents-web" in recipe
+    command = next(line.removeprefix("CMD ") for line in recipe.splitlines() if line.startswith("CMD "))
+    assert json.loads(command) == [
+        "uvicorn", "web.server:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1"
+    ]
 
 
 def test_compose_sets_revision_label_from_required_sha() -> None:
@@ -309,13 +332,14 @@ if name == "docker":
                 stdout = env["FAKE_EXISTING_SHA_IMAGE_ID"] + "\n"
             else:
                 exit_code = 1
-    elif len(args) == 15 and args[:4] == ["run", "--detach", "--rm", "--name"]:
+    elif len(args) == 17 and args[:4] == ["run", "--detach", "--rm", "--name"]:
         candidate = args[4]
         expected = [
             "run", "--detach", "--rm", "--name", candidate,
             "--read-only", "--cap-drop", "ALL",
             "--security-opt", "no-new-privileges",
             "--tmpfs", "/tmp:rw,noexec,nosuid,size=16m",
+            "--volume", "/var/lib/tradingagents-web",
             "--publish", "127.0.0.1::8080",
             f'trading-agents-web-ui:{env["FAKE_SHA"]}',
         ]
@@ -329,8 +353,20 @@ if name == "docker":
         if candidate.startswith(f'trading-agents-web-candidate-{env["FAKE_SHA"]}-'):
             allow()
             stdout = "127.0.0.1:49152\n"
-    elif len(args) == 3 and args[:2] == ["rm", "--force"]:
-        candidate = args[2]
+    elif len(args) == 3 and args[0] == "cp":
+        container, source = args[1].split(":", 1)
+        destination = Path(args[2])
+        candidate = container.startswith(f'trading-agents-web-candidate-{env["FAKE_SHA"]}-')
+        if (candidate or container == "existing-container") and source in {
+            "/app/web/client/dist/index.html", "/app/index.html"
+        } and destination.resolve().is_relative_to(Path(env["TMPDIR"]).resolve()):
+            allow()
+            if not candidate and env.get("FAKE_OLD_LEGACY") == "true" and source != "/app/index.html":
+                exit_code = 1
+            else:
+                destination.write_bytes(Path(env["FAKE_INDEX"] if candidate else env["FAKE_OLD_INDEX"]).read_bytes())
+    elif len(args) == 4 and args[:3] == ["rm", "--force", "--volumes"]:
+        candidate = args[3]
         if candidate.startswith(f'trading-agents-web-candidate-{env["FAKE_SHA"]}-'):
             allow()
             stdout = candidate + "\n"
@@ -437,7 +473,7 @@ elif name == "curl":
             elif not candidate and new_release and env.get("FAKE_LIVE_PAGE", "ok") != "ok":
                 output.write_bytes(b"wrong live page\n")
             else:
-                output.write_bytes(Path(env["FAKE_INDEX"]).read_bytes())
+                output.write_bytes(Path(env["FAKE_INDEX"] if candidate or new_release else env["FAKE_OLD_INDEX"]).read_bytes())
 elif name == "ss":
     if args == ["-H", "-ltn", "sport = :7681"]:
         allow()
@@ -490,11 +526,14 @@ class FakeCommands:
         return [json.loads(line) for line in self.log_path.read_text().splitlines()]
 
     def run(self, sha: str = SHA, **overrides: str) -> subprocess.CompletedProcess[str]:
+        built_index = self.temp_dir / "built-index.html"
+        built_index.write_text('<html><script src="/assets/index-built123.js"></script></html>')
         environment = {
             "PATH": str(self.bin_dir),
             "TMPDIR": str(self.temp_dir),
             "FAKE_COMMAND_LOG": str(self.log_path),
-            "FAKE_INDEX": str(INDEX),
+            "FAKE_INDEX": str(built_index),
+            "FAKE_OLD_INDEX": str(INDEX),
             "FAKE_SHA": SHA,
             "FAKE_EXISTING_IMAGE": "",
             "FAKE_EXISTING_IMAGE_ID": "sha256:old-image",
@@ -605,7 +644,7 @@ def test_candidate_readiness_retries_transient_connection_failure(
     assert sum(call[0] == "docker-compose" and "up" in call for call in invoked) == 1
 
 
-def test_candidate_page_must_match_checked_in_bytes(fake_commands: FakeCommands) -> None:
+def test_candidate_page_must_match_built_image_bytes(fake_commands: FakeCommands) -> None:
     result = fake_commands.run(FAKE_CANDIDATE_PAGE="wrong")
 
     assert result.returncode == 1
@@ -643,11 +682,15 @@ def test_non_container_port_conflict_fails_before_build(fake_commands: FakeComma
     assert not any(call[0] == "docker-compose" for call in invoked)
 
 
-def test_post_cutover_failure_restores_previous_image(fake_commands: FakeCommands) -> None:
+@pytest.mark.parametrize("legacy", ["true", "false"])
+def test_post_cutover_failure_restores_previous_image(
+    fake_commands: FakeCommands, legacy: str
+) -> None:
     result = fake_commands.run(
         FAKE_EXISTING_IMAGE=OLD_IMAGE,
         FAKE_PORT_OWNER="project",
         FAKE_LIVE_HEALTH="fail",
+        FAKE_OLD_LEGACY=legacy,
     )
 
     assert result.returncode == 22
@@ -663,6 +706,7 @@ def test_post_cutover_failure_restores_previous_image(fake_commands: FakeCommand
         for call in calls
     )
     assert not any(call["command"][-2:] == ["stop", "web"] for call in calls)
+    assert "previous Compose web image did not recover" not in result.stderr
 
 
 def test_failed_first_deployment_stops_service(fake_commands: FakeCommands) -> None:
