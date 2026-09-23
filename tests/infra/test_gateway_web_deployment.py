@@ -545,8 +545,6 @@ class FakeCommands:
             "FAKE_CANDIDATE_PAGE": "ok",
             "FAKE_LIVE_HEALTH": "ok",
             "FAKE_LIVE_PAGE": "ok",
-            "MANUAL_RELEASE_SHA": SHA,
-            "PRIVATE_INGRESS_VERIFIED_SHA": SHA,
         }
         environment.update(overrides)
         result = subprocess.run(
@@ -579,19 +577,12 @@ def commands(calls: list[dict[str, object]]) -> list[list[str]]:
     return [call["command"] for call in calls]  # type: ignore[misc]
 
 
-@pytest.mark.parametrize("overrides", [
-    {"MANUAL_RELEASE_SHA": ""},
-    {"PRIVATE_INGRESS_VERIFIED_SHA": ""},
-    {"MANUAL_RELEASE_SHA": OLD_SHA},
-    {"PRIVATE_INGRESS_VERIFIED_SHA": OLD_SHA},
-])
-def test_deploy_requires_manual_release_and_private_ingress_attestation_before_commands(
-    fake_commands, overrides
-):
-    result = fake_commands.run(**overrides)
-    assert result.returncode != 0
-    assert "manual release" in result.stderr or "private ingress" in result.stderr
-    assert fake_commands.calls() == []
+def test_deploy_from_push_needs_no_manual_attestations(fake_commands: FakeCommands) -> None:
+    result = fake_commands.run(MANUAL_RELEASE_SHA="", PRIVATE_INGRESS_VERIFIED_SHA="")
+    assert result.returncode == 0, result.stderr
+    invoked = commands(fake_commands.calls())
+    assert any(call[:2] == ["docker", "build"] for call in invoked)
+    assert any(call[0] == "docker-compose" and "up" in call for call in invoked)
 
 
 def test_candidate_is_verified_before_cutover(fake_commands: FakeCommands) -> None:
