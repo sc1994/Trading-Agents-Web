@@ -75,6 +75,16 @@ def test_crypto_cannot_select_fundamentals(defaults):
                        "analysts": ["fundamentals"]}, defaults)
 
 
+@pytest.mark.parametrize("ticker,claimed_type,analysts", [
+    ("BTC-USD", "stock", ["fundamentals"]),
+    ("AAPL", "crypto", ["market"]),
+])
+def test_explicit_asset_type_cannot_conflict_with_ticker(ticker, claimed_type, analysts, defaults):
+    with pytest.raises(ValueError, match="asset_type"):
+        validate_task({"ticker": ticker, "asset_type": claimed_type,
+                       "date": "2026-09-22", "analysts": analysts}, defaults)
+
+
 def test_crypto_filters_incompatible_default_analysts(defaults):
     config = validate_task({"ticker": "BTC-USD", "date": "2026-09-22"},
                            {**defaults, "analysts": ["market", "fundamentals"]})

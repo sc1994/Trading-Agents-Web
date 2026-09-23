@@ -54,13 +54,16 @@ def validate_task(raw: dict, defaults: dict) -> dict:
         raise ValueError("date must not be in the future")
 
     asset = raw.get("asset_type", "auto")
+    detected_asset_type = detect_asset_type(ticker)
     if asset == "auto":
-        asset_type = detect_asset_type(ticker)
+        asset_type = detected_asset_type
     else:
         try:
             asset_type = AssetType(asset)
         except (ValueError, TypeError) as exc:
             raise ValueError("asset_type must be stock, crypto, or auto") from exc
+        if asset_type != detected_asset_type:
+            raise ValueError("asset_type conflicts with the ticker")
 
     requested_analysts = raw.get("analysts", defaults.get("analysts", []))
     if not isinstance(requested_analysts, list) or not requested_analysts:
