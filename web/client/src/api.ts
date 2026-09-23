@@ -49,13 +49,7 @@ export interface TaskView {
   current_stage: string | null;
   current_node: string | null;
   rating:
-    | "Buy"
-    | "Overweight"
-    | "Hold"
-    | "Underweight"
-    | "Sell"
-    | "REVIEW"
-    | null;
+    "Buy" | "Overweight" | "Hold" | "Underweight" | "Sell" | "REVIEW" | null;
   decision: string | null;
   error: string | null;
   created_at: string;
@@ -66,11 +60,43 @@ export interface TaskView {
   can_resume: boolean;
 }
 export interface WebApi {
+  getTask(id: string): Promise<TaskView>;
+  listTasks(filters: TaskFilters): Promise<{ tasks: TaskView[] }>;
+  getReport(id: string): Promise<ReportView>;
+  subscribeTask(
+    id: string,
+    after: number,
+    handlers: TaskSubscription,
+  ): () => void;
+  resumeTask(id: string): Promise<TaskView>;
+  rerunTask(id: string): Promise<TaskView>;
+  deleteTask(id: string): Promise<void>;
   searchSymbols(q: string, signal?: AbortSignal): Promise<SearchResponse>;
   createTask(params: TaskParams): Promise<TaskView>;
   getSettings(): Promise<SettingsView>;
   saveSettings(changes: SettingsChanges): Promise<SettingsView>;
   testConnection(provider: string): Promise<{ ok: boolean; error?: string }>;
+}
+export interface TaskFilters {
+  q?: string;
+  status?: TaskView["status"];
+  rating?: NonNullable<TaskView["rating"]>;
+}
+export interface ReportView {
+  task_id: string;
+  sections: Record<string, string>;
+  decision: null | {
+    rating: NonNullable<TaskView["rating"]>;
+    executive_summary?: string;
+    investment_thesis?: string;
+    price_target?: string;
+    time_horizon?: string;
+  };
+}
+export interface TaskSubscription {
+  onEvent(event: { id: number; type: string }): void;
+  onError(): void;
+  onOpen(): void;
 }
 export class ApiError extends Error {
   constructor(
@@ -110,6 +136,41 @@ export async function request<T>(
   return response.status === 204 ? (undefined as T) : response.json();
 }
 export const webApi: WebApi = {
+  getTask: (id) => request(`/tasks/${encodeURIComponent(id)}`),
+  listTasks: (filters) => {
+    const query = new URLSearchParams();
+    for (const [key, value] of Object.entries(filters))
+      if (value) query.set(key, value);
+    return request(`/tasks?${query}`);
+  },
+  getReport: (id) => request(`/tasks/${encodeURIComponent(id)}/report`),
+  resumeTask: (id) =>
+    request(`/tasks/${encodeURIComponent(id)}/resume`, { method: "POST" }),
+  rerunTask: (id) =>
+    request(`/tasks/${encodeURIComponent(id)}/rerun`, { method: "POST" }),
+  deleteTask: (id) =>
+    request(`/tasks/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  subscribeTask: (id, after, handlers) => {
+    const source = new EventSource(
+      `/api/tasks/${encodeURIComponent(id)}/events?after=${after}`,
+    );
+    source.onopen = handlers.onOpen;
+    source.onerror = handlers.onError;
+    for (const type of [
+      "running",
+      "section",
+      "queued",
+      "interrupted",
+      "failed",
+      "completed",
+    ]) {
+      source.addEventListener(type, (event) => {
+        const id = Number((event as MessageEvent).lastEventId);
+        if (Number.isSafeInteger(id) && id > 0) handlers.onEvent({ id, type });
+      });
+    }
+    return () => source.close();
+  },
   searchSymbols: (q, signal) =>
     request(`/assets/search?q=${encodeURIComponent(q)}`, { signal }),
   createTask: (params) =>

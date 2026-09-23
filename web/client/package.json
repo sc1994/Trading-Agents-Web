@@ -7,16 +7,19 @@
     "dev": "vite --host 127.0.0.1",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
-    "test": "vitest"
+    "test": "vitest",
+    "acceptance": "npm run build && node scripts/acceptance.mjs"
   },
   "dependencies": {
     "@ant-design/icons": "^6.0.0",
     "antd": "^5.27.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
+    "react-markdown": "^10.1.0",
     "react-router-dom": "^7.9.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@testing-library/jest-dom": "^6.9.0",
     "@testing-library/react": "^16.3.0",
     "@testing-library/user-event": "^14.6.1",

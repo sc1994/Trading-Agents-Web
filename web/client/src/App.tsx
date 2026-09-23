@@ -9,15 +9,18 @@ import {
 import {
   BrowserRouter,
   Link,
-  NavLink,
   Route,
   Routes,
   useLocation,
   useNavigate,
+  useParams,
 } from "react-router-dom";
 import { webApi } from "./api";
 import { Start } from "./pages/Start";
 import { Settings } from "./pages/Settings";
+import { Run } from "./pages/Run";
+import { Report } from "./pages/Report";
+import { History } from "./pages/History";
 
 const navigation = [
   { to: "/", label: "发起分析", mobile: "分析", icon: <PlusOutlined /> },
@@ -40,40 +43,39 @@ const navigation = [
     icon: <SettingOutlined />,
   },
 ];
-function PendingPage({ title }: { title: string }) {
-  return (
-    <>
-      <div className="page-heading">
-        <h1>{title}</h1>
-      </div>
-      <div className="empty-page">
-        <Empty description="此页面正在建设中，已提交的任务会继续在后台运行。">
-          <Link to="/">返回发起分析</Link>
-        </Empty>
-      </div>
-    </>
-  );
+function TaskPage({ report = false }: { report?: boolean }) {
+  const { id = "" } = useParams();
+  const navigate = useNavigate();
+  const Page = report ? Report : Run;
+  return <Page key={id} api={webApi} taskId={id} navigate={navigate} />;
 }
 function Workbench() {
   const navigate = useNavigate();
   const location = useLocation();
   const activePath = location.pathname + location.search;
+  const activeNav = location.pathname.startsWith("/tasks/")
+    ? "/history"
+    : location.pathname.startsWith("/reports/")
+      ? "/history?view=reports"
+      : location.pathname === "/history"
+        ? new URLSearchParams(location.search).get("view") === "reports"
+          ? "/history?view=reports"
+          : "/history"
+        : location.pathname;
   const label =
     navigation.find((item) => item.to === activePath)?.label ??
     (location.pathname.startsWith("/tasks/") ? "任务运行" : "决策报告");
   const nav = (mobile: boolean) =>
     navigation.map((item) => (
-      <NavLink
+      <Link
         key={item.label}
         to={item.to}
-        className={() =>
-          activePath === item.to ? "nav-item active" : "nav-item"
-        }
-        aria-current={activePath === item.to ? "page" : undefined}
+        className={activeNav === item.to ? "nav-item active" : "nav-item"}
+        aria-current={activeNav === item.to ? "page" : undefined}
       >
         {item.icon}
         <span>{mobile ? item.mobile : item.label}</span>
-      </NavLink>
+      </Link>
     ));
   return (
     <div className="workbench">
@@ -119,23 +121,18 @@ function Workbench() {
             <Route
               path="/history"
               element={
-                <PendingPage
-                  title={
-                    location.search === "?view=reports"
-                      ? "决策报告"
-                      : "任务记录"
+                <History
+                  api={webApi}
+                  navigate={navigate}
+                  reportsOnly={
+                    new URLSearchParams(location.search).get("view") ===
+                    "reports"
                   }
                 />
               }
             />
-            <Route
-              path="/tasks/:id"
-              element={<PendingPage title="任务运行" />}
-            />
-            <Route
-              path="/reports/:id"
-              element={<PendingPage title="决策报告" />}
-            />
+            <Route path="/tasks/:id" element={<TaskPage />} />
+            <Route path="/reports/:id" element={<TaskPage report />} />
             <Route
               path="*"
               element={

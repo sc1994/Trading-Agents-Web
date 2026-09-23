@@ -33,6 +33,13 @@ export const task: TaskView = {
   can_resume: false,
 };
 export const fakeApi: WebApi = {
+  getTask: vi.fn(),
+  listTasks: vi.fn(),
+  getReport: vi.fn(),
+  subscribeTask: vi.fn(),
+  resumeTask: vi.fn(),
+  rerunTask: vi.fn(),
+  deleteTask: vi.fn(),
   searchSymbols: vi.fn(),
   createTask: vi.fn(),
   getSettings: vi.fn(),
@@ -43,6 +50,17 @@ export const navigate = vi.fn();
 export function resetApi() {
   Object.values(fakeApi).forEach((method) => vi.mocked(method).mockReset());
   navigate.mockReset();
+  vi.mocked(fakeApi.getTask).mockResolvedValue(structuredClone(task));
+  vi.mocked(fakeApi.listTasks).mockResolvedValue({ tasks: [] });
+  vi.mocked(fakeApi.getReport).mockResolvedValue({
+    task_id: task.id,
+    sections: {},
+    decision: null,
+  });
+  vi.mocked(fakeApi.subscribeTask).mockReturnValue(vi.fn());
+  vi.mocked(fakeApi.resumeTask).mockResolvedValue(structuredClone(task));
+  vi.mocked(fakeApi.rerunTask).mockResolvedValue(structuredClone(task));
+  vi.mocked(fakeApi.deleteTask).mockResolvedValue(undefined);
   vi.mocked(fakeApi.getSettings).mockResolvedValue(structuredClone(settings));
   vi.mocked(fakeApi.saveSettings).mockResolvedValue(structuredClone(settings));
   vi.mocked(fakeApi.searchSymbols).mockResolvedValue({
