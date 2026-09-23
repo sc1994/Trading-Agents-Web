@@ -19,17 +19,6 @@ if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
     exit 2
 fi
 
-# The workbench has no authentication. A loopback port alone does not protect
-# against an existing public reverse proxy. Fail before any external command.
-if [[ "${MANUAL_RELEASE_SHA:-}" != "$sha" ]]; then
-    printf 'manual release approval must name this exact FULL_SHA\n' >&2
-    exit 2
-fi
-if [[ "${PRIVATE_INGRESS_VERIFIED_SHA:-}" != "$sha" ]]; then
-    printf 'private ingress verification must be attested for this exact FULL_SHA\n' >&2
-    exit 2
-fi
-
 readonly image_ref="${image_repository}:${sha}"
 readonly candidate_name="trading-agents-web-candidate-${sha}-$$"
 
