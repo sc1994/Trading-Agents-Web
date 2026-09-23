@@ -65,6 +65,7 @@ class Store:
                     rating TEXT,
                     decision TEXT,
                     error TEXT,
+                    resume_requested INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     started_at TEXT,
@@ -89,6 +90,8 @@ class Store:
                     value TEXT NOT NULL
                 );
             """)
+            if "resume_requested" not in {row["name"] for row in db.execute("PRAGMA table_info(tasks)")}:
+                db.execute("ALTER TABLE tasks ADD COLUMN resume_requested INTEGER NOT NULL DEFAULT 0")
 
     @contextmanager
     def transaction(self, *, immediate: bool = False):
@@ -214,6 +217,10 @@ class Store:
             )
             if cursor.rowcount != 1:
                 raise ValueError("only running tasks can finish")
+            db.execute(
+                "INSERT INTO events (task_id, kind, payload, created_at) VALUES (?, 'completed', ?, ?)",
+                (task_id, _json({"rating": rating}), now),
+            )
 
     def fail(self, task_id: str, error: str) -> None:
         with self.transaction(immediate=True) as db:
@@ -225,15 +232,42 @@ class Store:
             )
             if cursor.rowcount != 1:
                 raise ValueError("only running tasks can fail")
+            db.execute(
+                "INSERT INTO events (task_id, kind, payload, created_at) VALUES (?, 'failed', ?, ?)",
+                (task_id, _json({"error": error}), now),
+            )
 
-    def interrupt_running(self) -> None:
+    def requeue_interrupted(self, task_id: str) -> dict:
+        """Keep the original immutable graph parameters and persist resume intent."""
         with self.transaction(immediate=True) as db:
             now = _now()
+            cursor = db.execute(
+                """UPDATE tasks SET status='queued', resume_requested=1, error=NULL,
+                   finished_at=NULL, updated_at=? WHERE id=? AND status='interrupted'""",
+                (now, task_id),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("only interrupted tasks can resume")
+            db.execute(
+                "INSERT INTO events (task_id, kind, payload, created_at) VALUES (?, 'queued', ?, ?)",
+                (task_id, _json({"resume_requested": True}), now),
+            )
+            return self._task(db, db.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone())
+
+    def interrupt_running(self) -> list[str]:
+        with self.transaction(immediate=True) as db:
+            now = _now()
+            task_ids = [row["id"] for row in db.execute("SELECT id FROM tasks WHERE status='running'")]
             db.execute(
                 """UPDATE tasks SET status='interrupted', finished_at=?, updated_at=?
                    WHERE status='running'""",
                 (now, now),
             )
+            db.executemany(
+                "INSERT INTO events (task_id, kind, payload, created_at) VALUES (?, 'interrupted', '{}', ?)",
+                [(task_id, now) for task_id in task_ids],
+            )
+            return task_ids
 
     def delete_task(self, task_id: str) -> bool:
         with self.transaction(immediate=True) as db:
