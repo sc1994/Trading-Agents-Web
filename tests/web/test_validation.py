@@ -1,5 +1,5 @@
 import json
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
@@ -48,7 +48,28 @@ def test_validation_rejects_empty_or_malformed_date(value, defaults):
 
 def test_validation_rejects_future_date(defaults):
     with pytest.raises(ValueError, match="date"):
-        validate_task({"ticker": "AAPL", "date": (date.today() + timedelta(days=1)).isoformat()}, defaults)
+        validate_task({"ticker": "AAPL", "date": (
+            datetime.now(timezone.utc).date() + timedelta(days=2)
+        ).isoformat()}, defaults)
+
+
+def test_shanghai_local_today_is_allowed_across_utc_midnight(defaults, monkeypatch):
+    class ClockDate(date):
+        @classmethod
+        def today(cls):
+            return cls(2026, 9, 22)
+
+    class ClockDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 9, 22, 16, 30, tzinfo=timezone.utc).astimezone(tz)
+
+    monkeypatch.setattr("web.validation.date", ClockDate)
+    monkeypatch.setattr("web.validation.datetime", ClockDateTime, raising=False)
+    # 16:30 UTC is 00:30 on September 23 in Shanghai.
+    assert validate_task({"ticker": "AAPL", "date": "2026-09-23"}, defaults)["date"] == "2026-09-23"
+    with pytest.raises(ValueError, match="date"):
+        validate_task({"ticker": "AAPL", "date": "2026-09-24"}, defaults)
 
 
 @pytest.mark.parametrize("override,field", [

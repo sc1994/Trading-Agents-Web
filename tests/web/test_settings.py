@@ -265,16 +265,7 @@ def test_connection_test_does_not_probe_unconfigured_or_custom_endpoints(tmp_pat
         "ok": False,
         "error": "Credential not configured",
     }
-    assert service.test_connection("openai_compatible") == {
-        "ok": False,
-        "error": "Connection test unavailable for this provider",
-    }
-    service.update(
-        {"provider": "openai_compatible", "quick_model": "local-fast", "deep_model": "local-deep"}
-    )
-    assert service.test_connection("openai_compatible") == {
-        "ok": False,
-        "error": "Connection test unavailable for this provider",
-    }
+    with pytest.raises(ValueError, match="provider"):
+        service.test_connection("openai_compatible")
     with pytest.raises(ValueError, match="supported"):
         service.test_connection("http://127.0.0.1")

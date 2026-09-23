@@ -128,7 +128,7 @@ export function Start({
     setError("");
     if (!settings) return;
     if (
-      !["ollama", "bedrock", "openai_compatible"].includes(provider) &&
+      !["ollama", "bedrock"].includes(provider) &&
       !settings.keys[provider]?.configured
     ) {
       const message = `请先在设置中配置 ${providerLabels[provider] ?? provider} API Key。`;

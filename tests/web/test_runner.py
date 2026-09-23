@@ -1,11 +1,14 @@
+import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
+from io import StringIO
 from threading import Event
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+import requests
 from langgraph.graph import END, START, StateGraph
 from typing_extensions import TypedDict
 
@@ -335,3 +338,53 @@ def test_checkpoint_teardown_error_cannot_leak_credentials(setup_runner, monkeyp
         runner.run(task, lambda *_: None)
     assert "secret-run-key" not in str(exc.value)
     assert os.environ["OPENAI_API_KEY"] == "original-key"
+
+
+def test_vendor_http_failure_redacts_service_logs_including_threaded_tracebacks(
+    setup_runner, monkeypatch, caplog
+):
+    from tradingagents.dataflows.config import set_config
+    from tradingagents.dataflows.interface import route_to_vendor
+
+    runner, task, control = setup_runner
+    set_config({"tool_vendors": {"get_macro_indicators": "fred"}})
+    original_factory = logging.getLogRecordFactory()
+    output = StringIO()
+    handler = logging.StreamHandler(output)
+    logger = logging.getLogger("web-test-private-handler")
+    logger.addHandler(handler)
+    logger.propagate = False
+
+    def failed_http(url, *, params, timeout):
+        response = requests.Response()
+        response.status_code = 503
+        response.reason = "Service unavailable"
+        response.url = requests.Request("GET", url, params=params).prepare().url
+        return response
+
+    def vendor_failure():
+        route_to_vendor("get_macro_indicators", "cpi", "2024-01-02")
+        try:
+            raise RuntimeError("Downstream failure secret-data-key")
+        except RuntimeError:
+            logger.exception("Vendor request failed with %s", "secret-run-key")
+            raise
+
+    def run_in_graph_thread():
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            pool.submit(vendor_failure).result(timeout=5)
+
+    monkeypatch.setattr(requests, "get", failed_http)
+    control.gate = run_in_graph_thread
+    try:
+        with caplog.at_level(logging.WARNING), pytest.raises(RuntimeError, match="Analysis failed"):
+            runner.run(task, lambda *_: None)
+        logs = caplog.text + output.getvalue()
+        assert "Vendor" in logs and "503" in logs and "Traceback" in logs
+        assert "secret-data-key" not in logs
+        assert "secret-run-key" not in logs
+        assert "[REDACTED]" in logs
+        assert logging.getLogRecordFactory() is original_factory
+    finally:
+        logger.removeHandler(handler)
+        logger.propagate = True

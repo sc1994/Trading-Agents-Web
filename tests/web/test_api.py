@@ -11,6 +11,40 @@ from web.server import create_app
 PARAMS = {"ticker": "nvda", "name": "NVIDIA", "date": "2026-09-22"}
 
 
+def test_history_and_snapshot_do_not_wait_for_active_analysis_lock(client):
+    from web.runner import _RUN_LOCK, GraphRunner
+
+    store = client.app.state.store
+    # Stop the test worker before constructing interrupted history.
+    client.app.state.worker.stop()
+    task_id = store.create_task(PARAMS)
+    store.claim_next()
+    store.interrupt_running()
+    client.app.state.runner = GraphRunner(client.app.state.settings, client.app.state.data_dir)
+    with ThreadPoolExecutor(max_workers=1) as pool, _RUN_LOCK:
+        pending = pool.submit(client.get, "/api/tasks")
+        response = pending.result(timeout=1)
+        assert response.status_code == 200
+        task = next(task for task in response.json()["tasks"] if task["id"] == task_id)
+        assert task["status"] == "interrupted" and task["can_resume"] is False
+        response = pool.submit(client.get, f"/api/tasks/{task_id}").result(timeout=1)
+        assert response.status_code == 200
+        assert response.json()["can_resume"] is False
+
+
+@pytest.mark.parametrize("method,path", [("POST", "/api/tasks"), ("PATCH", "/api/settings")])
+def test_unconfigured_compatible_provider_rejected_without_mutation(client, method, path):
+    before = client.app.state.store.get_settings()
+    body = {"provider": "openai_compatible", "quick_model": "local-fast", "deep_model": "local-deep"}
+    if method == "POST":
+        body.update(PARAMS)
+    response = client.request(method, path, json=body)
+    assert response.status_code == 422
+    assert "provider" in response.text
+    assert client.get("/api/tasks").json() == {"tasks": []}
+    assert client.app.state.store.get_settings() == before
+
+
 def test_health_and_secret_mask(client):
     assert client.get("/healthz").text == "ok\n"
     response = client.patch("/api/settings", json={"keys": {"openai": "sk-private-1234"}})

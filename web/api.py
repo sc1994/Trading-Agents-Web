@@ -108,7 +108,7 @@ def _get_task(request: Request, task_id: str) -> dict:
 
 
 def _view(request: Request, task: dict) -> TaskView:
-    # Every caller is a sync route/thread: can_resume can wait for a graph run's lock.
+    # Resume availability is a nonblocking hint, rechecked by the runner on execution.
     can_resume = task["status"] == "interrupted" and request.app.state.runner.can_resume(task)
     return TaskView(**task, can_resume=can_resume)
 

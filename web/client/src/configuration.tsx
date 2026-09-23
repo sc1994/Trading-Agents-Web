@@ -13,7 +13,6 @@ export const providerLabels: Record<string, string> = {
   minimax: "MiniMax · 国际",
   "minimax-cn": "MiniMax · 中国",
   ollama: "Ollama",
-  openai_compatible: "OpenAI 兼容服务",
   mistral: "Mistral",
   kimi: "Kimi",
   groq: "Groq",

@@ -6,16 +6,19 @@ import json
 import os
 import secrets
 from collections.abc import Callable
+from contextlib import ExitStack
 from copy import deepcopy
 from pathlib import Path
 from threading import RLock
 from types import SimpleNamespace
+from urllib.parse import quote, quote_plus
 from uuid import UUID
 
 from tradingagents.agents.utils.rating import RATING_REVIEW, extract_rating
 from tradingagents.dataflows.utils import safe_ticker_component
 from tradingagents.graph.checkpointer import checkpoint_step, clear_checkpoint, thread_id
 from tradingagents.graph.trading_graph import TradingAgentsGraph
+from web.logging import redact_logs
 from web.reports import public_text, report_sections
 from web.settings import SettingsService
 
@@ -95,17 +98,20 @@ class GraphRunner:
             return False
 
     def can_resume(self, task: dict) -> bool:
-        """Check compatibility and current credentials without creating an LLM."""
-        with _RUN_LOCK:
-            try:
-                params = task.get("params", task)
-                config, credentials = self._config(params)
-                task_id = str(UUID(task["id"]))
-                return self._has_checkpoint(config, params) and self._credential_binding(
-                    task_id, config, params, credentials
-                )
-            except (ValueError, KeyError, OSError, TypeError, AttributeError):
-                return False
+        """Best-effort read probe; active analyses must not stall HTTP readers."""
+        if not _RUN_LOCK.acquire(blocking=False):
+            return False
+        try:
+            params = task.get("params", task)
+            config, credentials = self._config(params)
+            task_id = str(UUID(task["id"]))
+            return self._has_checkpoint(config, params) and self._credential_binding(
+                task_id, config, params, credentials
+            )
+        except (ValueError, KeyError, OSError, TypeError, AttributeError):
+            return False
+        finally:
+            _RUN_LOCK.release()
 
     def run(
         self, task: dict, emit: Callable[[str, dict], None], *, resume: bool = False
@@ -120,7 +126,7 @@ class GraphRunner:
         except (KeyError, TypeError, ValueError, AttributeError):
             raise ValueError("task id must be a UUID") from None
         params = task.get("params", task)
-        with _RUN_LOCK:
+        with _RUN_LOCK, ExitStack() as scope:
             config, credentials = self._config(params)
             if resume and not (
                 self._has_checkpoint(config, params)
@@ -132,11 +138,14 @@ class GraphRunner:
                 raise ValueError("task report directory is invalid")
             config["results_dir"] = str(output)
             previous_env = {key: os.environ.get(key) for key in credentials}
+            secret_forms = {
+                form for secret in credentials.values() if secret
+                for form in (secret, quote(secret, safe=""), quote_plus(secret))
+            }
 
             def redact(text):
-                for secret in sorted(set(credentials.values()), key=len, reverse=True):
-                    if secret:
-                        text = text.replace(secret, "[REDACTED]")
+                for secret in sorted(secret_forms, key=len, reverse=True):
+                    text = text.replace(secret, "[REDACTED]")
                 return public_text(text)
 
             def sanitized(value):
@@ -149,6 +158,7 @@ class GraphRunner:
                 return value
 
             graph = None
+            scope.enter_context(redact_logs(redact))
             try:
                 os.environ.update(credentials)
                 # Thread identities are shared across matching tasks: a rerun

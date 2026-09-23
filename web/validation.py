@@ -1,7 +1,7 @@
 """Normalize an analysis request into an allowlisted, JSON-safe task snapshot."""
 
 import re
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 
 from cli.models import AnalystType, AssetType
 from cli.utils import (
@@ -11,6 +11,7 @@ from cli.utils import (
     normalize_ticker_symbol,
 )
 from tradingagents.llm_clients.model_catalog import get_model_options
+from web.settings import WEB_PROVIDERS
 
 DEPTH_ROUNDS = {"quick": 1, "standard": 2, "deep": 3}
 _MAX_ROUNDS = 5
@@ -50,7 +51,9 @@ def validate_task(raw: dict, defaults: dict) -> dict:
         analysis_date = date.fromisoformat(date_text)
     except ValueError as exc:
         raise ValueError("date must be a valid ISO calendar date") from exc
-    if analysis_date > date.today():
+    # Browsers submit local calendar dates; UTC+14 can already be on tomorrow.
+    # A one-day UTC allowance accepts local today without trusting a client zone.
+    if analysis_date > datetime.now(timezone.utc).date() + timedelta(days=1):
         raise ValueError("date must not be in the future")
 
     asset = raw.get("asset_type", "auto")
@@ -88,6 +91,8 @@ def validate_task(raw: dict, defaults: dict) -> dict:
     if not isinstance(provider, str):
         raise ValueError("provider must be supported")
     provider = provider.strip().lower()
+    if provider not in WEB_PROVIDERS:
+        raise ValueError("provider must be supported")
     try:
         get_model_options(provider, "quick")
     except KeyError as exc:

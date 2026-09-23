@@ -1,9 +1,18 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { ConfigProvider } from "antd";
 import { Settings } from "./Settings";
 import { fakeApi, resetApi } from "../test/fixtures";
 
 beforeEach(resetApi);
+
+it("does not offer an unconfigured OpenAI compatible endpoint", async () => {
+  render(<ConfigProvider virtual={false}><Settings api={fakeApi} /></ConfigProvider>);
+  await userEvent.click(await screen.findByRole("tab", { name: "默认模型" }));
+  await userEvent.click(await screen.findByLabelText("默认供应商"));
+  expect(await screen.findByText("Anthropic")).toBeInTheDocument();
+  expect(screen.queryByText("OpenAI 兼容服务")).not.toBeInTheDocument();
+});
 
 it("shows only masked key status and omits blank keys on save", async () => {
   render(<Settings api={fakeApi} />);

@@ -10,6 +10,8 @@ from tradingagents.llm_clients.api_key_env import PROVIDER_API_KEY_ENV
 from tradingagents.llm_clients.model_catalog import MODEL_OPTIONS, get_model_options
 from web.store import Store
 
+WEB_PROVIDERS = frozenset(MODEL_OPTIONS) - {"openai_compatible"}
+
 _CREDENTIAL_ENVS = {
     **{provider: env for provider, env in PROVIDER_API_KEY_ENV.items() if env},
     "fred": "FRED_API_KEY",
@@ -64,7 +66,7 @@ class SettingsService:
             raise ValueError("unsupported setting")
         current = self.public()
         provider = changes.get("provider", current["provider"])
-        if not isinstance(provider, str) or provider not in MODEL_OPTIONS:
+        if not isinstance(provider, str) or provider not in WEB_PROVIDERS:
             raise ValueError("provider must be supported")
         update = {}
         if "provider" in changes:
@@ -113,7 +115,7 @@ class SettingsService:
             raise ValueError("run params must be an object")
         defaults = self.public()
         provider = params.get("provider", defaults["provider"])
-        if not isinstance(provider, str) or provider not in MODEL_OPTIONS:
+        if not isinstance(provider, str) or provider not in WEB_PROVIDERS:
             raise ValueError("provider must be supported")
         models = {}
         for field, mode in (("quick_model", "quick"), ("deep_model", "deep")):
@@ -151,14 +153,14 @@ class SettingsService:
             if (value := saved.get(f"key:{name}") or os.environ.get(_CREDENTIAL_ENVS[name]))
         }
         provider_env = PROVIDER_API_KEY_ENV.get(provider)
-        if provider_env and provider != "openai_compatible" and provider_env not in credentials:
+        if provider_env and provider_env not in credentials:
             raise ValueError(f"credential for {provider} is not configured")
         return {"config": config, "api_key_env": credentials}
 
     def test_connection(self, provider: str) -> dict:
-        if not isinstance(provider, str) or provider not in MODEL_OPTIONS:
+        if not isinstance(provider, str) or provider not in WEB_PROVIDERS:
             raise ValueError("provider must be supported")
-        if provider in {"ollama", "openai_compatible", "azure", "bedrock"}:
+        if provider in {"ollama", "azure", "bedrock"}:
             return {"ok": False, "error": "Connection test unavailable for this provider"}
         env = PROVIDER_API_KEY_ENV.get(provider)
         saved = self.store.get_settings()

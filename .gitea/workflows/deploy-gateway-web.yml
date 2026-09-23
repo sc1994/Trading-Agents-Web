@@ -1,9 +1,16 @@
-name: Deploy gateway blank web page
+name: Manually release private gateway workbench
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
+    inputs:
+      release_sha:
+        description: Full main SHA explicitly approved for this release
+        required: true
+        type: string
+      private_ingress_verified_sha:
+        description: Repeat the release SHA only after verifying all ingress is private and recording evidence
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -18,7 +25,7 @@ jobs:
       ${{ (github.server_url == 'http://suncheng.online:14200' ||
       github.server_url == 'http://192.168.31.2:14200') &&
       github.repository == 'suncheng/Trading-Agents-Web' &&
-      github.ref == 'refs/heads/main' }}
+      github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' }}
     runs-on: gateway
     steps:
       - name: Check out the synchronized commit
@@ -30,6 +37,8 @@ jobs:
       - name: Build, deploy, and verify
         env:
           DEPLOY_SHA: ${{ github.sha }}
+          MANUAL_RELEASE_SHA: ${{ github.event.inputs.release_sha }}
+          PRIVATE_INGRESS_VERIFIED_SHA: ${{ github.event.inputs.private_ingress_verified_sha }}
         run: |
           set -Eeuo pipefail
           case "$DEPLOY_SHA" in
