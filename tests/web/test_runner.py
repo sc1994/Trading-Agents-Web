@@ -41,13 +41,14 @@ def setup_runner(tmp_path, monkeypatch):
                  final_trade_decision=DECISION)
     final["risk_debate_state"]["judge_decision"] = DECISION
     control = SimpleNamespace(states=[initial, market, market, debate, final], graphs=[],
-                              error=None, begin_error=False, resume=False, gate=None)
+                              error=None, begin_error=False, resume=False, gate=None,
+                              provider_key="secret-run-key", data_key="secret-data-key")
 
     class FakeGraph(TradingAgentsGraph):
         def __init__(self, *, debug, config, selected_analysts):
             assert debug is False
-            assert os.environ["OPENAI_API_KEY"] == "secret-run-key"
-            assert os.environ["FRED_API_KEY"] == "secret-data-key"
+            assert os.environ["OPENAI_API_KEY"] == control.provider_key
+            assert os.environ["FRED_API_KEY"] == control.data_key
             self.config, self.selected_analysts = config, selected_analysts
             self.propagator = Propagator()
             self.log_states_dict = {}
@@ -174,13 +175,23 @@ def _checkpoint(tmp_path):
             "thread_id": thread_id("AAPL", "2024-01-02", signature)}})
 
 
+def _interrupted_checkpoint(setup_runner, tmp_path):
+    runner, task, control = setup_runner
+    control.error = RuntimeError("Interrupted stream")
+    with pytest.raises(RuntimeError):
+        runner.run(task, lambda *_: None)
+    control.error = None
+    control.graphs.clear()
+    _checkpoint(tmp_path)
+
+
 def test_resume_checks_signature_without_constructing_llm_and_fresh_run_clears_old_checkpoint(
     setup_runner, tmp_path
 ):
     runner, task, control = setup_runner
     assert runner.can_resume(task) is False
     assert not (tmp_path / "cache").exists()
-    _checkpoint(tmp_path)
+    _interrupted_checkpoint(setup_runner, tmp_path)
     assert runner.can_resume(task) is True
     incompatible = deepcopy(task)
     incompatible["params"]["max_debate_rounds"] = 1
@@ -195,7 +206,7 @@ def test_explicit_resume_uses_checkpoint_input_and_rejects_missing_checkpoint(se
     with pytest.raises(ValueError, match="checkpoint"):
         runner.run(task, lambda *_: None, resume=True)
     assert control.graphs == []
-    _checkpoint(tmp_path)
+    _interrupted_checkpoint(setup_runner, tmp_path)
     control.resume = True
     runner.run(task, lambda *_: None, resume=True)
     assert control.graphs[0].input is None
@@ -237,6 +248,79 @@ def test_process_lock_covers_entire_stream_and_restores_environment_on_success(s
     assert second_entered.is_set()
     assert os.environ["OPENAI_API_KEY"] == "original-key"
     assert "FRED_API_KEY" not in os.environ
+
+
+@pytest.mark.parametrize("source", ["provider", "data", "environment"])
+def test_credential_rotation_rejects_old_secret_checkpoint_before_emitting(
+    setup_runner, tmp_path, monkeypatch, source
+):
+    runner, task, control = setup_runner
+    monkeypatch.setenv("ALPHA_VANTAGE_API_KEY", "old-environment-key")
+    _interrupted_checkpoint(setup_runner, tmp_path)
+    assert GraphRunner(runner.settings, tmp_path).can_resume(task) is True
+    if source == "provider":
+        runner.settings.update({"keys": {"openai": "rotated-provider-key"}})
+        control.provider_key = "rotated-provider-key"
+    elif source == "data":
+        runner.settings.update({"keys": {"fred": "rotated-data-key"}})
+        control.data_key = "rotated-data-key"
+    else:
+        monkeypatch.setenv("ALPHA_VANTAGE_API_KEY", "rotated-environment-key")
+    control.resume = True
+    control.states[0]["market_report"] = "secret-run-key secret-data-key old-environment-key"
+    events = []
+    assert runner.can_resume(task) is False
+    with pytest.raises(ValueError, match="checkpoint"):
+        runner.run(task, lambda kind, payload: events.append((kind, payload)), resume=True)
+    assert events == []
+    assert control.graphs == []
+    assert not (tmp_path / "reports" / TASK_ID).exists()
+
+
+def test_resume_fails_closed_for_unbound_checkpoint_or_different_task(setup_runner, tmp_path):
+    runner, task, control = setup_runner
+    _checkpoint(tmp_path)
+    assert runner.can_resume(task) is False
+    with pytest.raises(ValueError, match="checkpoint"):
+        runner.run(task, lambda *_: None, resume=True)
+    assert control.graphs == []
+    _interrupted_checkpoint(setup_runner, tmp_path)
+    other = {**task, "id": "dadb2df8-ff8a-4aa0-a73c-f979bb796088"}
+    assert runner.can_resume(other) is False
+    assert runner.can_resume(task) is True
+
+
+@pytest.mark.parametrize("missing", ["hmac.key", "tag"])
+def test_resume_binding_is_private_and_missing_binding_material_fails_closed(
+    setup_runner, tmp_path, missing
+):
+    runner, task, _ = setup_runner
+    _interrupted_checkpoint(setup_runner, tmp_path)
+    private = tmp_path / "private" / "checkpoint-bindings"
+    files = list(private.iterdir())
+    assert len(files) == 2
+    assert private.stat().st_mode & 0o777 == 0o700
+    for path in files:
+        assert path.stat().st_mode & 0o777 == 0o600
+        assert b"secret-run-key" not in path.read_bytes()
+        assert b"secret-data-key" not in path.read_bytes()
+    target = private / "hmac.key" if missing == "hmac.key" else next(private.glob("*.tag"))
+    target.unlink()
+    restarted = GraphRunner(runner.settings, tmp_path)
+    assert restarted.can_resume(task) is False
+    with pytest.raises(ValueError, match="checkpoint"):
+        restarted.run(task, lambda *_: None, resume=True)
+
+
+def test_rating_is_parsed_before_redacting_credential_that_matches_rating(setup_runner):
+    runner, task, control = setup_runner
+    runner.settings.update({"keys": {"openai": "Overweight"}})
+    control.provider_key = "Overweight"
+    events = []
+    state, rating = runner.run(task, lambda kind, payload: events.append((kind, payload)))
+    assert rating == "Overweight"
+    assert state["final_trade_decision"] == DECISION
+    assert not any("Overweight" in payload["text"] for _, payload in events)
 
 
 def test_checkpoint_teardown_error_cannot_leak_credentials(setup_runner, monkeypatch):

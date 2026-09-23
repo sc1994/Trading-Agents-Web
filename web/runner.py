@@ -1,6 +1,10 @@
 """Serial, credential-scoped adapter for the existing TradingAgents graph."""
 
+import hashlib
+import hmac
+import json
 import os
+import secrets
 from collections.abc import Callable
 from copy import deepcopy
 from pathlib import Path
@@ -8,10 +12,11 @@ from threading import RLock
 from types import SimpleNamespace
 from uuid import UUID
 
+from tradingagents.agents.utils.rating import RATING_REVIEW, extract_rating
 from tradingagents.dataflows.utils import safe_ticker_component
-from tradingagents.graph.checkpointer import checkpoint_step, clear_checkpoint
+from tradingagents.graph.checkpointer import checkpoint_step, clear_checkpoint, thread_id
 from tradingagents.graph.trading_graph import TradingAgentsGraph
-from web.reports import decision_view, public_text, report_sections
+from web.reports import public_text, report_sections
 from web.settings import SettingsService
 
 # LLM/data clients read process-global environment variables throughout a run.
@@ -49,14 +54,57 @@ class GraphRunner:
             self._signature(config, params),
         ) is not None
 
+    def _credential_binding(
+        self, task_id: str, config: dict, params: dict, credentials: dict, *, create: bool = False
+    ) -> bool:
+        """Bind a shared checkpoint thread to its task and original credentials.
+
+        Only a keyed HMAC is persisted, outside public reports/settings. A lost
+        key or tag invalidates resume rather than trusting unbound raw state.
+        Calls are serialized by the process-wide run lock.
+        """
+        private = self.data_dir / "private" / "checkpoint-bindings"
+        key_path = private / "hmac.key"
+        tid = thread_id(params["ticker"], params["date"], self._signature(config, params))
+        tag_path = private / f"{tid}.tag"
+        try:
+            if create:
+                private.mkdir(mode=0o700, parents=True, exist_ok=True)
+                private.chmod(0o700)
+                if not key_path.exists():
+                    with os.fdopen(os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb") as file:
+                        file.write(secrets.token_bytes(32))
+            key = key_path.read_bytes()
+            if len(key) != 32:
+                return False
+            # Include ownership because multiple Web tasks share graph threads.
+            payload = json.dumps(
+                [task_id, tid, credentials], sort_keys=True, separators=(",", ":")
+            ).encode()
+            tag = hmac.new(key, payload, hashlib.sha256).hexdigest().encode()
+            if create:
+                temporary = tag_path.with_suffix(".tmp")
+                with os.fdopen(os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "wb") as file:
+                    file.write(tag)
+                temporary.replace(tag_path)
+                return True
+            return hmac.compare_digest(tag_path.read_bytes(), tag)
+        except OSError:
+            if create:
+                raise
+            return False
+
     def can_resume(self, task: dict) -> bool:
         """Check compatibility and current credentials without creating an LLM."""
         with _RUN_LOCK:
             try:
                 params = task.get("params", task)
-                config, _ = self._config(params)
-                return self._has_checkpoint(config, params)
-            except (ValueError, KeyError, OSError):
+                config, credentials = self._config(params)
+                task_id = str(UUID(task["id"]))
+                return self._has_checkpoint(config, params) and self._credential_binding(
+                    task_id, config, params, credentials
+                )
+            except (ValueError, KeyError, OSError, TypeError, AttributeError):
                 return False
 
     def run(
@@ -74,7 +122,10 @@ class GraphRunner:
         params = task.get("params", task)
         with _RUN_LOCK:
             config, credentials = self._config(params)
-            if resume and not self._has_checkpoint(config, params):
+            if resume and not (
+                self._has_checkpoint(config, params)
+                and self._credential_binding(task_id, config, params, credentials)
+            ):
                 raise ValueError("No compatible checkpoint is available")
             output = self.data_dir / "reports" / task_id
             if not output.resolve().is_relative_to(self.data_dir / "reports"):
@@ -107,6 +158,10 @@ class GraphRunner:
                         config["data_cache_dir"], params["ticker"], params["date"],
                         self._signature(config, params),
                     )
+                if not resume and config.get("checkpoint_enabled") and not self._credential_binding(
+                    task_id, config, params, credentials, create=True
+                ):
+                    raise RuntimeError("Unable to bind checkpoint credentials")
                 graph = TradingAgentsGraph(
                     debug=False, config=config, selected_analysts=params["analysts"]
                 )
@@ -139,6 +194,7 @@ class GraphRunner:
                 if final_state is None or not final_state.get("final_trade_decision"):
                     raise RuntimeError("Graph produced no final decision")
                 graph.curr_state = final_state
+                rating = extract_rating(final_state["final_trade_decision"]) or RATING_REVIEW
                 # Upstream logs/report writers take state, never the credential
                 # envelope. Redact report text before writing their projections.
                 safe_state = sanitized(final_state)
@@ -151,7 +207,7 @@ class GraphRunner:
                 graph.clear_checkpoint_on_success(
                     params["ticker"], params["date"], params["asset_type"]
                 )
-                return final_state, decision_view(safe_state["final_trade_decision"])["rating"]
+                return final_state, rating
             except Exception:
                 # Provider/tool exceptions may contain keys, URLs or prompts.
                 raise RuntimeError("Analysis failed; partial reports were preserved") from None
