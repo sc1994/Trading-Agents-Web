@@ -27,7 +27,7 @@ def test_creation_and_history_filters(tmp_path):
     assert store.list_tasks(query="nvidia") == [task]
     assert store.list_tasks(query="aapl") == []
     assert store.list_tasks(status="queued") == [task]
-    assert store.list_tasks(rating="BUY") == []
+    assert store.list_tasks(rating="Buy") == []
     assert store.get_task("missing") is None
 
 
@@ -56,21 +56,38 @@ def test_sections_overwrite_and_finish_requires_saved_decision(tmp_path):
     task_id = store.create_task({"ticker": "NVDA"})
     store.claim_next()
     with pytest.raises(ValueError, match="decision"):
-        store.finish(task_id, "BUY", "Proposed purchase")
+        store.finish(task_id, "Buy", "Proposed purchase")
     assert store.get_task(task_id)["status"] == "running"
     store.save_section(task_id, "decision", "Initial decision")
     store.save_section(task_id, "decision", "Proposed purchase")
     store.save_section(task_id, "analysts", "Fundamental analysis")
-    store.finish(task_id, "BUY", "Proposed purchase")
+    store.finish(task_id, "Buy", "Proposed purchase")
     task = Store(tmp_path / "web.db").get_task(task_id)
     assert task["sections"] == {
         "decision": "Proposed purchase",
         "analysts": "Fundamental analysis",
     }
     assert task["decision"] == "Proposed purchase"
-    assert task["rating"] == "BUY"
+    assert task["rating"] == "Buy"
     assert task["status"] == "completed"
-    assert store.list_tasks(status="completed", rating="BUY") == [task]
+    assert store.list_tasks(status="completed", rating="Buy") == [task]
+
+
+@pytest.mark.parametrize("rating", ["BUY", "buy", "", "Strong Buy"])
+def test_finish_rejects_invalid_rating_without_mutation(tmp_path, rating):
+    store = Store(tmp_path / "web.db")
+    task_id = store.create_task({"ticker": "NVDA"})
+    store.claim_next()
+    store.save_section(task_id, "decision", "Proposed purchase")
+
+    with pytest.raises(ValueError, match="rating"):
+        store.finish(task_id, rating, "Proposed purchase")
+
+    task = Store(tmp_path / "web.db").get_task(task_id)
+    assert task["status"] == "running"
+    assert task["rating"] is None
+    assert task["decision"] is None
+    assert task["sections"]["decision"] == "Proposed purchase"
 
 
 def test_failure_keeps_partial_report_and_releases_queue(tmp_path):

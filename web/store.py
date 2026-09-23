@@ -188,6 +188,8 @@ class Store:
             db.execute("UPDATE tasks SET updated_at=? WHERE id=?", (_now(), task_id))
 
     def finish(self, task_id: str, rating: str, decision: str) -> None:
+        if rating not in {"Buy", "Overweight", "Hold", "Underweight", "Sell", "REVIEW"}:
+            raise ValueError("invalid rating")
         with self.transaction(immediate=True) as db:
             row = db.execute(
                 "SELECT text FROM sections WHERE task_id=? AND section='decision'", (task_id,)
