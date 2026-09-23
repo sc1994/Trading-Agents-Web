@@ -45,7 +45,8 @@ def workflow_command_data(node: object) -> list[object]:
 def test_gitea_workflow_is_restricted_to_gateway_main() -> None:
     workflow = load_workflow(GITEA_WORKFLOW)
 
-    assert set(workflow["on"]) == {"workflow_dispatch"}
+    assert set(workflow["on"]) == {"push"}
+    assert workflow["on"]["push"]["branches"] == ["main"]
     assert workflow["permissions"] == {"contents": "read"}
     assert workflow["concurrency"] == {
         "group": "trading-agents-web-gateway-deploy",
@@ -58,7 +59,7 @@ def test_gitea_workflow_is_restricted_to_gateway_main() -> None:
         "${{ (github.server_url == 'http://suncheng.online:14200' || "
         "github.server_url == 'http://192.168.31.2:14200') && "
         "github.repository == 'suncheng/Trading-Agents-Web' && "
-        "github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' }}"
+        "github.ref == 'refs/heads/main' && github.event_name == 'push' }}"
     )
 
 
@@ -88,11 +89,8 @@ def test_gitea_workflow_deploys_only_the_checked_out_full_sha() -> None:
     workflow = load_workflow(GITEA_WORKFLOW)
     deploy = workflow["jobs"]["deploy"]["steps"][1]
 
-    assert deploy["env"] == {
-        "DEPLOY_SHA": "${{ github.sha }}",
-        "MANUAL_RELEASE_SHA": "${{ github.event.inputs.release_sha }}",
-        "PRIVATE_INGRESS_VERIFIED_SHA": "${{ github.event.inputs.private_ingress_verified_sha }}",
-    }
+    assert deploy["env"] == {"DEPLOY_SHA": "${{ github.sha }}"}
+    assert "github.event.inputs" not in json.dumps(workflow_command_data(workflow))
     run = deploy["run"]
     assert run.startswith("set -Eeuo pipefail\n")
     assert "*[!0-9a-f]*|'') exit 2" in run
