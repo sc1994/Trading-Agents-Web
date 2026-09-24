@@ -29,7 +29,8 @@ def _model(raw: dict, defaults: dict, provider: str, field: str, mode: str) -> s
     if not isinstance(model, str) or not model.strip() or len(model.strip()) > 128:
         raise ValueError(f"{field} must be a supported model")
     model = model.strip()
-    options = [value for _, value in get_model_options(provider, mode)]
+    catalog = "openai_compatible" if provider.startswith("custom:") else provider
+    options = [value for _, value in get_model_options(catalog, mode)]
     if model == "custom" or (model not in options and "custom" not in options):
         raise ValueError(f"{field} must be a supported model")
     return model
@@ -90,11 +91,24 @@ def validate_task(raw: dict, defaults: dict) -> dict:
     provider = raw.get("provider", defaults.get("provider"))
     if not isinstance(provider, str):
         raise ValueError("provider must be supported")
-    provider = provider.strip().lower()
-    if provider not in WEB_PROVIDERS:
+    provider = provider.strip()
+    if provider.lower() in WEB_PROVIDERS:
+        provider = provider.lower()
+    providers = defaults.get("providers")
+    if providers is not None:
+        selected = next((item for item in providers if item["id"] == provider), None)
+        if selected is None:
+            raise ValueError("provider is not joined")
+        if selected["kind"] not in {"built_in", "custom"}:
+            raise ValueError("provider must be supported")
+    elif provider not in WEB_PROVIDERS:
         raise ValueError("provider must be supported")
+    if provider.startswith("custom:") and provider != defaults.get("provider"):
+        for field in ("quick_model", "deep_model"):
+            if field not in raw:
+                raise ValueError(f"{field} must be specified for a custom provider")
     try:
-        get_model_options(provider, "quick")
+        get_model_options("openai_compatible" if provider.startswith("custom:") else provider, "quick")
     except KeyError as exc:
         raise ValueError("provider must be supported") from exc
 

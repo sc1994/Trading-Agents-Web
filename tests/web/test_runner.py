@@ -118,6 +118,28 @@ def test_stream_emits_only_changes_and_preserves_graph_finalization(setup_runner
     assert len(list((tmp_path / "reports" / TASK_ID).rglob("*.json"))) == 1
 
 
+def test_keyless_custom_endpoint_shadows_ambient_key_only_during_run(setup_runner, monkeypatch):
+    runner, task, control = setup_runner
+    provider = runner.settings.add_provider({"kind": "custom", "name": "Local",
+                 "base_url": "http://localhost:1234/v1"})["providers"][-1]["id"]
+    task["params"].update(provider=provider, quick_model="fast", deep_model="deep")
+    # The shared FakeGraph also asserts the original built-in OpenAI fixture key.
+    monkeypatch.setenv("OPENAI_API_KEY", control.provider_key)
+    monkeypatch.setenv("OPENAI_COMPATIBLE_API_KEY", "unrelated-ambient-secret")
+
+    observed = []
+
+    def check_scoped_environment():
+        observed.append((os.environ.get("OPENAI_COMPATIBLE_API_KEY"),
+                         control.graphs[0].config["llm_provider"],
+                         control.graphs[0].config["backend_url"]))
+
+    control.gate = check_scoped_environment
+    runner.run(task, lambda kind, payload: None)
+    assert observed == [("", "openai_compatible", "http://localhost:1234/v1")]
+    assert os.environ["OPENAI_COMPATIBLE_API_KEY"] == "unrelated-ambient-secret"
+
+
 @pytest.mark.parametrize("begin_error", [False, True])
 def test_failure_restores_credentials_ends_checkpoint_and_retains_partial_reports(
     setup_runner, monkeypatch, begin_error

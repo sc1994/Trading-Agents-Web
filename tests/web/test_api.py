@@ -56,6 +56,69 @@ def test_health_and_secret_mask(client):
     )
 
 
+def test_provider_routes_manage_custom_metadata_and_mask_credentials(client):
+    path = "/api/settings/providers"
+    created = client.post(path, json={"kind": "custom", "name": "Gateway",
+                                      "base_url": "http://localhost:1234/v1/", "key": "secret-xyz99"})
+    assert created.status_code == 200
+    entry = next(item for item in created.json()["providers"] if item["name"] == "Gateway")
+    provider = entry["id"]
+    assert provider.startswith("custom:")
+    assert entry == {"id": provider, "name": "Gateway", "kind": "custom",
+                     "base_url": "http://localhost:1234/v1",
+                     "key": {"configured": True, "last4": "yz99"}}
+    assert "secret-xyz99" not in created.text + client.get("/api/settings").text
+
+    edited = client.patch(f"{path}/{provider}", json={"name": "Gateway 2",
+                            "base_url": "https://example.test/v1", "key": "replacement-5678"})
+    assert edited.status_code == 200
+    assert next(item for item in edited.json()["providers"] if item["id"] == provider) == {
+        "id": provider, "name": "Gateway 2", "kind": "custom",
+        "base_url": "https://example.test/v1", "key": {"configured": True, "last4": "5678"}}
+    assert "replacement-5678" not in edited.text
+    cleared = client.patch(f"{path}/{provider}", json={"clear_key": True})
+    assert cleared.status_code == 200
+    assert next(item for item in cleared.json()["providers"] if item["id"] == provider)["key"] == {
+        "configured": False, "last4": None}
+    removed = client.delete(f"{path}/{provider}")
+    assert removed.status_code == 200
+    assert provider not in {item["id"] for item in removed.json()["providers"]}
+
+
+def test_provider_routes_reject_invalid_shapes_and_deletion_guards(client):
+    path = "/api/settings/providers"
+    for body in ({"kind": "other", "name": "Bad", "base_url": "https://example.test"},
+                 {"kind": "custom", "name": "Bad", "base_url": "https://example.test",
+                  "unknown": "value"}):
+        assert client.post(path, json=body).status_code == 422
+    assert client.post(path, json={"kind": "built_in", "id": "mistral"}).status_code == 200
+    assert client.patch(f"{path}/mistral", json={"name": "Renamed"}).status_code == 422
+    assert client.patch(f"{path}/mistral", json={"key": "replacement",
+                                               "clear_key": True}).status_code == 422
+    assert client.delete(f"{path}/openai").status_code == 422
+    assert client.delete(f"{path}/custom:unknown").status_code == 422
+
+
+def test_task_accepts_joined_custom_id_but_never_exposes_its_url(client):
+    joined = client.post("/api/settings/providers", json={"kind": "custom", "name": "Desk",
+                         "base_url": "http://localhost:1234/v1", "key": "secret-xyz99"}).json()
+    provider = joined["providers"][-1]["id"]
+    body = {**PARAMS, "provider": provider, "quick_model": "local-fast", "deep_model": "local-deep"}
+    response = client.post("/api/tasks", json=body)
+    assert response.status_code == 201
+    assert response.json()["params"]["provider"] == provider
+    assert "localhost:1234" not in response.text
+    assert "secret-xyz99" not in response.text
+    assert client.post("/api/tasks", json={**body, "provider": "custom:unknown"}).status_code == 422
+    assert client.post("/api/tasks", json={**body, "quick_model": "custom"}).status_code == 422
+
+
+def test_task_normalizes_case_of_legacy_built_in_provider(client):
+    response = client.post("/api/tasks", json={**PARAMS, "provider": "OPENAI"})
+    assert response.status_code == 201
+    assert response.json()["params"]["provider"] == "openai"
+
+
 def test_task_creation_rechecks_provider_after_stale_api_precheck(client, monkeypatch):
     service = client.app.state.settings
     store = client.app.state.store

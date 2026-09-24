@@ -85,7 +85,8 @@ def _model_id(provider: str, mode: str, value: object) -> str:
     if not isinstance(value, str) or not value.strip() or len(value.strip()) > 128:
         raise ValueError(f"{mode}_model must be a supported model")
     model = value.strip()
-    options = {option for _, option in get_model_options(provider, mode)}
+    catalog = "openai_compatible" if provider.startswith("custom:") else provider
+    options = {option for _, option in get_model_options(catalog, mode)}
     if model == "custom" or (model not in options and "custom" not in options):
         raise ValueError(f"{mode}_model must be a supported model")
     return model
@@ -201,10 +202,13 @@ class SettingsService:
     def public(self) -> dict:
         saved = self.store.get_settings()
         provider = saved.get("provider", "openai")
+        catalog = "openai_compatible" if provider.startswith("custom:") else provider
+        quick_default = get_model_options(catalog, "quick")[0][1]
+        deep_default = get_model_options(catalog, "deep")[0][1]
         return {
             "provider": provider,
-            "quick_model": saved.get("quick_model", get_model_options(provider, "quick")[0][1]),
-            "deep_model": saved.get("deep_model", get_model_options(provider, "deep")[0][1]),
+            "quick_model": saved.get("quick_model", quick_default),
+            "deep_model": saved.get("deep_model", deep_default),
             "language": saved.get("language", "English"),
             "checkpoint_enabled": saved.get("checkpoint_enabled", "true") == "true",
             "keys": {
@@ -219,15 +223,22 @@ class SettingsService:
             raise ValueError("unsupported setting")
         current = self.public()
         provider = changes.get("provider", current["provider"])
-        if not isinstance(provider, str) or provider not in WEB_PROVIDERS:
+        if not isinstance(provider, str):
             raise ValueError("provider must be supported")
+        if provider in WEB_PROVIDERS:
+            selected = _built_in(provider)
+        else:
+            selected = self.joined_provider(provider)
+        catalog = "openai_compatible" if selected["kind"] == "custom" else provider
         update = {}
         if "provider" in changes:
             update["provider"] = provider
         for field, mode in (("quick_model", "quick"), ("deep_model", "deep")):
             fallback = next(
-                (value for _, value in get_model_options(provider, mode) if value != "custom"), None
+                (value for _, value in get_model_options(catalog, mode) if value != "custom"), None
             )
+            if selected["kind"] == "custom" and provider != current["provider"] and field not in changes:
+                raise ValueError(f"{field} must be specified for a custom provider")
             model = changes.get(
                 field, fallback if provider != current["provider"] else current[field]
             )
@@ -282,8 +293,10 @@ class SettingsService:
             raise ValueError("run params must be an object")
         defaults = self.public()
         provider = params.get("provider", defaults["provider"])
-        if not isinstance(provider, str) or provider not in WEB_PROVIDERS:
+        if not isinstance(provider, str):
             raise ValueError("provider must be supported")
+        selected = self.joined_provider(provider)
+        custom = selected["kind"] == "custom"
         models = {}
         for field, mode in (("quick_model", "quick"), ("deep_model", "deep")):
             model = params.get(field, defaults[field])
@@ -291,10 +304,10 @@ class SettingsService:
         config = deepcopy(DEFAULT_CONFIG)
         config.update(
             {
-                "llm_provider": provider,
+                "llm_provider": "openai_compatible" if custom else provider,
                 "quick_think_llm": models["quick_model"],
                 "deep_think_llm": models["deep_model"],
-                "backend_url": None,
+                "backend_url": selected["base_url"] if custom else None,
                 "output_language": params.get("language", defaults["language"]),
                 "checkpoint_enabled": params.get(
                     "checkpoint_enabled", defaults["checkpoint_enabled"]
@@ -312,29 +325,40 @@ class SettingsService:
                     raise ValueError(f"{key} must be between 1 and 5")
                 config[key] = count
         saved = self.store.get_settings()
-        names = (provider, "fred", "alpha_vantage")
+        names = ("fred", "alpha_vantage") if custom else (provider, "fred", "alpha_vantage")
         credentials = {
             _CREDENTIAL_ENVS[name]: value
             for name in names
             if name in _CREDENTIAL_ENVS
             if (value := saved.get(f"key:{name}") or os.environ.get(_CREDENTIAL_ENVS[name]))
         }
-        provider_env = PROVIDER_API_KEY_ENV.get(provider)
+        if custom:
+            # An empty overlay makes keyless endpoints use the client's placeholder,
+            # even when an unrelated generic credential exists in the process env.
+            credentials["OPENAI_COMPATIBLE_API_KEY"] = saved.get(f"key:{provider}") or ""
+        provider_env = PROVIDER_API_KEY_ENV.get(provider) if not custom else None
         if provider_env and provider_env not in credentials:
             raise ValueError(f"credential for {provider} is not configured")
         return {"config": config, "api_key_env": credentials}
 
     def test_connection(self, provider: str) -> dict:
-        if not isinstance(provider, str) or provider not in WEB_PROVIDERS:
+        if not isinstance(provider, str) or (
+            provider not in WEB_PROVIDERS and not provider.startswith("custom:")
+        ):
             raise ValueError("provider must be supported")
+        selected = self.joined_provider(provider)
+        custom = selected["kind"] == "custom"
         if provider in {"ollama", "azure", "bedrock"}:
             return {"ok": False, "error": "Connection test unavailable for this provider"}
         env = PROVIDER_API_KEY_ENV.get(provider)
         saved = self.store.get_settings()
         credential = saved.get(f"key:{provider}") or (os.environ.get(env) if env else None)
-        if not credential:
+        if not credential and not custom:
             return {"ok": False, "error": "Credential not configured"}
-        if provider == "anthropic":
+        if custom:
+            url = f"{selected['base_url'].rstrip('/')}/models"
+            headers = {"Authorization": f"Bearer {credential or 'EMPTY'}"}
+        elif provider == "anthropic":
             url = "https://api.anthropic.com/v1/models"
             headers = {"x-api-key": credential, "anthropic-version": "2023-06-01"}
         elif provider == "google":

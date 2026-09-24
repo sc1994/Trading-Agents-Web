@@ -264,14 +264,103 @@ def test_connection_test_does_not_probe_unconfigured_or_custom_endpoints(tmp_pat
         pytest.fail("No request should be made")
 
     monkeypatch.setattr(requests, "get", forbidden_get)
-    assert service.test_connection("anthropic") == {
-        "ok": False,
-        "error": "Credential not configured",
-    }
+    with pytest.raises(ValueError, match="joined"):
+        service.test_connection("anthropic")
     with pytest.raises(ValueError, match="provider"):
         service.test_connection("openai_compatible")
     with pytest.raises(ValueError, match="supported"):
         service.test_connection("http://127.0.0.1")
+
+
+def test_custom_run_config_uses_distinct_private_urls_and_keys(tmp_path):
+    service = SettingsService(Store(tmp_path / "web.db"))
+    first = service.add_provider({"kind": "custom", "name": "Gateway",
+                 "base_url": "http://localhost:1234/v1", "key": "secret-xyz99"})["providers"][-1]["id"]
+    second = service.add_provider({"kind": "custom", "name": "Cloud",
+                 "base_url": "https://gateway.example/v1", "key": "other-secret-6789"})["providers"][-1]["id"]
+    for provider, url, key in ((first, "http://localhost:1234/v1", "secret-xyz99"),
+                               (second, "https://gateway.example/v1", "other-secret-6789")):
+        result = service.resolve_run_config({"provider": provider,
+                                             "quick_model": "fast", "deep_model": "deep"})
+        assert result["config"]["llm_provider"] == "openai_compatible"
+        assert result["config"]["backend_url"] == url
+        assert result["api_key_env"]["OPENAI_COMPATIBLE_API_KEY"] == key
+        assert key not in str(service.public())
+    with pytest.raises(ValueError, match="joined"):
+        service.resolve_run_config({"provider": "custom:unknown", "quick_model": "fast",
+                                    "deep_model": "deep"})
+
+
+def test_keyless_custom_run_shadows_ambient_generic_credential(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENAI_COMPATIBLE_API_KEY", "other-endpoint-secret")
+    service = SettingsService(Store(tmp_path / "web.db"))
+    provider = service.add_provider({"kind": "custom", "name": "Local",
+               "base_url": "http://localhost:1234/v1"})["providers"][-1]["id"]
+
+    resolved = service.resolve_run_config({"provider": provider,
+                                           "quick_model": "fast", "deep_model": "deep"})
+
+    assert resolved["api_key_env"]["OPENAI_COMPATIBLE_API_KEY"] == ""
+    assert "other-endpoint-secret" not in str(resolved)
+
+
+def test_custom_connection_uses_saved_endpoint_without_redirects_or_remote_errors(tmp_path, monkeypatch):
+    service = SettingsService(Store(tmp_path / "web.db"))
+    provider = service.add_provider({"kind": "custom", "name": "Gateway",
+               "base_url": "http://localhost:1234/v1", "key": "secret-xyz99"})["providers"][-1]["id"]
+
+    class Response:
+        status_code = 500
+        text = "private remote error secret-xyz99"
+
+    def fake_get(url, **kwargs):
+        assert url == "http://localhost:1234/v1/models"
+        assert kwargs == {"headers": {"Authorization": "Bearer secret-xyz99"},
+                          "timeout": (3, 5), "allow_redirects": False}
+        return Response()
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    assert service.test_connection(provider) == {"ok": False, "error": "Connection test failed"}
+    with pytest.raises(ValueError, match="joined"):
+        service.test_connection("custom:unknown")
+
+
+def test_keyless_custom_connection_uses_placeholder(tmp_path, monkeypatch):
+    service = SettingsService(Store(tmp_path / "web.db"))
+    provider = service.add_provider({"kind": "custom", "name": "Local",
+               "base_url": "http://localhost:1234/v1"})["providers"][-1]["id"]
+
+    class Response:
+        status_code = 200
+
+    def fake_get(url, **kwargs):
+        assert url == "http://localhost:1234/v1/models"
+        assert kwargs == {"headers": {"Authorization": "Bearer EMPTY"},
+                          "timeout": (3, 5), "allow_redirects": False}
+        return Response()
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    assert service.test_connection(provider) == {"ok": True}
+
+
+def test_custom_defaults_require_explicit_models_and_task_uses_generic_catalog(tmp_path):
+    service = SettingsService(Store(tmp_path / "web.db"))
+    provider = service.add_provider({"kind": "custom", "name": "Gateway",
+               "base_url": "http://localhost:1234/v1"})["providers"][-1]["id"]
+    with pytest.raises(ValueError, match="quick_model"):
+        service.update({"provider": provider})
+    public = service.update({"provider": provider, "quick_model": "local-fast",
+                             "deep_model": "local-deep"})
+    assert public["provider"] == provider
+    assert service.update({"language": "Chinese"})["quick_model"] == "local-fast"
+    task = validate_task({"ticker": "NVDA", "date": "2026-09-22", "provider": provider,
+                          "quick_model": "local-fast", "deep_model": "local-deep"},
+                         {**public, "analysts": ["market"]})
+    assert task["provider"] == provider
+    assert task["quick_model"] == "local-fast"
+    with pytest.raises(ValueError, match="provider"):
+        validate_task({"ticker": "NVDA", "date": "2026-09-22", "provider": "custom:unknown"},
+                      {**public, "analysts": ["market"]})
 
 
 def test_legacy_defaults_stored_keys_and_environment_keys_are_joined(tmp_path, monkeypatch):

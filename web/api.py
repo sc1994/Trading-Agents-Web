@@ -56,9 +56,32 @@ class ConnectionInput(InputModel):
     provider: str
 
 
+class ProviderCreateInput(InputModel):
+    kind: Literal["built_in", "custom"]
+    id: str | None = None
+    name: str | None = None
+    base_url: str | None = None
+    key: str | None = None
+
+
+class ProviderEditInput(InputModel):
+    name: str | None = None
+    base_url: str | None = None
+    key: str | None = None
+    clear_key: bool = False
+
+
 class KeyStatus(BaseModel):
     configured: bool
     last4: str | None
+
+
+class ProviderView(BaseModel):
+    id: str
+    name: str
+    kind: Literal["built_in", "custom"]
+    base_url: str | None
+    key: KeyStatus
 
 
 class SettingsView(BaseModel):
@@ -68,6 +91,7 @@ class SettingsView(BaseModel):
     language: str
     checkpoint_enabled: bool
     keys: dict[str, KeyStatus]
+    providers: list[ProviderView]
 
 
 class TaskView(BaseModel):
@@ -139,6 +163,30 @@ def settings(request: Request):
 def update_settings(body: SettingsInput, request: Request):
     try:
         return request.app.state.settings.update(body.model_dump(exclude_unset=True))
+    except ValueError as error:
+        raise _invalid(error) from None
+
+
+@router.post("/settings/providers", response_model=SettingsView)
+def add_provider(body: ProviderCreateInput, request: Request):
+    try:
+        return request.app.state.settings.add_provider(body.model_dump(exclude_unset=True))
+    except ValueError as error:
+        raise _invalid(error) from None
+
+
+@router.patch("/settings/providers/{provider_id}", response_model=SettingsView)
+def edit_provider(provider_id: str, body: ProviderEditInput, request: Request):
+    try:
+        return request.app.state.settings.edit_provider(provider_id, body.model_dump(exclude_unset=True))
+    except ValueError as error:
+        raise _invalid(error) from None
+
+
+@router.delete("/settings/providers/{provider_id}", response_model=SettingsView)
+def remove_provider(provider_id: str, request: Request):
+    try:
+        return request.app.state.settings.remove_provider(provider_id)
     except ValueError as error:
         raise _invalid(error) from None
 
