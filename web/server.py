@@ -43,6 +43,36 @@ def _origin(value: str):
         return None
 
 
+def _browser_origin(request: Request):
+    """Origin the browser used, as seen through a TLS-terminating reverse proxy.
+
+    Uvicorn receives the proxied plain-HTTP hop, so request.url alone reports the
+    internal scheme and rejects every browser write behind an https entry.
+    Forwarded headers cannot be set by page script (forbidden request headers),
+    so a proxy-supplied value still reflects the real browser origin.
+    """
+    proto = host = None
+    for element in reversed(request.headers.getlist("forwarded")):
+        for parameter in element.split(";"):
+            name, _, value = parameter.partition("=")
+            name = name.strip().lower()
+            value = value.strip().strip('"')
+            if name == "proto" and proto is None:
+                proto = value.lower()
+            elif name == "host" and host is None:
+                host = value
+    proto = proto or request.headers.get("x-forwarded-proto")
+    host = host or request.headers.get("x-forwarded-host") or request.headers.get("host")
+    port = request.headers.get("x-forwarded-port")
+    if not proto or not host:
+        return _origin(f"{request.url.scheme}://{request.url.netloc}")
+    host = host.split(",")[0].strip()
+    forwarded = f"{proto}://{host}"
+    if port and ":" not in host:
+        forwarded = f"{forwarded}:{port}"
+    return _origin(forwarded)
+
+
 def create_app(data_dir: Path | None = None, executor: GraphRunner | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app):
@@ -71,7 +101,7 @@ def create_app(data_dir: Path | None = None, executor: GraphRunner | None = None
         response = None
         if request.method not in {"GET", "HEAD", "OPTIONS"}:
             origin = request.headers.get("origin")
-            expected = _origin(f"{request.url.scheme}://{request.url.netloc}")
+            expected = _browser_origin(request)
             if request.headers.get("sec-fetch-site") == "cross-site" or (
                 origin is not None and (_origin(origin) is None or _origin(origin) != expected)
             ):
