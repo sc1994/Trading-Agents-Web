@@ -22,8 +22,8 @@ Docker CLI、Buildx、Compose 和 `ss`。在激活标签前，必须先核对网
 Compose 服务及配置挂载、镜像内命令和 `127.0.0.1:7681` 占用状态。现有注册文件
 `/data/.runner` 不得读取、删除或重新注册；配置文件 `runner.labels` 必须填写
 `ubuntu-latest:docker://docker-cli:latest`、`emailbill:docker://docker-cli:latest`
-及上述 `gateway` 完整规格，再只重建 Runner 服务。修改前备份配置并保留权限；
-重建后确认原 Runner 身份和原有两个标签均不变。回退时从备份恢复配置，仅重建
+及上述 `gateway` 完整规格，再只重启 Runner 服务。修改前备份配置并保留权限；
+重启后确认原 Runner 身份和原有两个标签均不变。回退时从备份恢复配置，仅重启
 Runner 服务，保留工作台的服务和数据卷。
 
 本机预置顺序（仅在更新后的脚本已进入 Gitea `main` 时执行）：
@@ -44,12 +44,13 @@ Runner 服务，保留工作台的服务和数据卷。
    `/wd/apps/vols/gitea/runner/config.yaml` 并保留权限。使用 YAML 解析器
    在原配置添加完整 `runner.labels` 三项，不修改 `container.valid_volumes`、
    Compose 其他服务或 `.runner` 注册文件。运行
-   `docker compose -f /wd/apps/docker/dockge/code/compose.yaml -p code up -d
-   --no-deps --no-build gitea-runner`，只更新这一服务。
+   `docker compose -f /wd/apps/docker/dockge/code/compose.yaml -p code restart
+   gitea-runner`，只重启这一服务。单纯运行 `up -d` 不会因挂载的配置文件变化
+   而重启容器，也就不会重新声明标签。
 4. 确认原 Runner ID 在线、`ubuntu-latest` 和 `emailbill` 保留、`gateway`
    指向已核对的本机镜像；再确认等待任务及本服务容器、镜像 revision 和
    `127.0.0.1:7681/healthz`。任一步异常都停止扩大变更，依据备份恢复配置并
-   仅重建 Runner 服务，不手动启动或覆盖工作台服务。
+   仅重启 Runner 服务，不手动启动或覆盖工作台服务。
 
 Runner 任务容器保持现有隔离网络。部署脚本只对宿主机端口监听和回环 HTTP 校验
 启动短生命周期 `--network host` 探测容器；该容器只读、丢弃 capabilities、没有
