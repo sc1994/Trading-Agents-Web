@@ -158,16 +158,29 @@ class SettingsService:
         return {"config": config, "api_key_env": credentials}
 
     def test_connection(self, provider: str) -> dict:
-        if not isinstance(provider, str) or provider not in WEB_PROVIDERS:
+        if not isinstance(provider, str) or provider not in WEB_PROVIDERS | {"fred", "alpha_vantage"}:
             raise ValueError("provider must be supported")
         if provider in {"ollama", "azure", "bedrock"}:
             return {"ok": False, "error": "Connection test unavailable for this provider"}
-        env = PROVIDER_API_KEY_ENV.get(provider)
+        env = _CREDENTIAL_ENVS.get(provider)
         saved = self.store.get_settings()
         credential = saved.get(f"key:{provider}") or (os.environ.get(env) if env else None)
         if not credential:
             return {"ok": False, "error": "Credential not configured"}
-        if provider == "anthropic":
+        params = None
+        if provider == "fred":
+            from tradingagents.dataflows.fred import FRED_API_BASE
+
+            url = f"{FRED_API_BASE}/series"
+            params = {"series_id": "FEDFUNDS", "api_key": credential, "file_type": "json"}
+            headers = {}
+        elif provider == "alpha_vantage":
+            from tradingagents.dataflows.alpha_vantage_common import API_BASE_URL
+
+            url = API_BASE_URL
+            params = {"function": "TIME_SERIES_DAILY", "symbol": "IBM", "apikey": credential}
+            headers = {}
+        elif provider == "anthropic":
             url = "https://api.anthropic.com/v1/models"
             headers = {"x-api-key": credential, "anthropic-version": "2023-06-01"}
         elif provider == "google":
@@ -182,9 +195,24 @@ class SettingsService:
             url = f"{base_url.rstrip('/')}/models"
             headers = {"Authorization": f"Bearer {credential}"}
         try:
-            response = requests.get(url, headers=headers, timeout=(3, 5), allow_redirects=False)
+            response = requests.get(
+                url, headers=headers, params=params, timeout=(3, 5), allow_redirects=False
+            )
             if 200 <= response.status_code < 300:
-                return {"ok": True}
+                if provider == "fred":
+                    payload = response.json()
+                    series = payload.get("seriess") if isinstance(payload, dict) else None
+                    if isinstance(series, list) and any(
+                        isinstance(item, dict) and item.get("id") == "FEDFUNDS" for item in series
+                    ):
+                        return {"ok": True}
+                elif provider == "alpha_vantage":
+                    payload = response.json()
+                    series = payload.get("Time Series (Daily)") if isinstance(payload, dict) else None
+                    if isinstance(series, dict) and series:
+                        return {"ok": True}
+                else:
+                    return {"ok": True}
         except Exception:
             pass
         return {"ok": False, "error": "Connection test failed"}

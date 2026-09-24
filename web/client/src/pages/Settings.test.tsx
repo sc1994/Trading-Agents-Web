@@ -101,6 +101,25 @@ it("tests only the selected saved provider after explicit user action", async ()
   expect(await screen.findByText("OpenAI 连接成功")).toBeInTheDocument();
 });
 
+it.each(["FRED", "Alpha Vantage"])("tests the saved %s data source only on demand", async (label) => {
+  render(<Settings api={fakeApi} />);
+  await userEvent.click(await screen.findByRole("tab", { name: "数据源" }));
+  expect(fakeApi.testConnection).not.toHaveBeenCalled();
+  await userEvent.click(screen.getByRole("button", { name: `测试 ${label} 连接` }));
+  await waitFor(() => expect(fakeApi.testConnection).toHaveBeenCalledWith(
+    label === "FRED" ? "fred" : "alpha_vantage",
+  ));
+  expect(await screen.findByText(`${label} 连接成功`)).toBeInTheDocument();
+});
+
+it("requires saving a new data source key before testing it", async () => {
+  render(<Settings api={fakeApi} />);
+  await userEvent.click(await screen.findByRole("tab", { name: "数据源" }));
+  await userEvent.type(screen.getByLabelText("FRED API Key"), "new-secret");
+  expect(screen.getByRole("button", { name: "测试 FRED 连接" })).toBeDisabled();
+  expect(fakeApi.testConnection).not.toHaveBeenCalled();
+});
+
 it("keeps edits available when save fails and displays a safe error", async () => {
   vi.mocked(fakeApi.saveSettings).mockRejectedValue(
     new Error("request failed"),

@@ -189,20 +189,18 @@ export function Settings({ api }: { api: WebApi }) {
               </Form.Item>
               <Space wrap>
                 <Tooltip title="仅测试服务器已保存的密钥；更改后请先保存">
-                  {!dataSource && (
-                    <Button
-                      aria-label={`测试 ${keyLabel(name)} 连接`}
-                      loading={testing === name}
-                      disabled={
-                        !!testing ||
-                        !!passwords[name] ||
-                        clearKeys.includes(name)
-                      }
-                      onClick={() => testConnection(name)}
-                    >
-                      测试连接
-                    </Button>
-                  )}
+                  <Button
+                    aria-label={`测试 ${keyLabel(name)} 连接`}
+                    loading={testing === name}
+                    disabled={
+                      !!testing ||
+                      !!passwords[name] ||
+                      clearKeys.includes(name)
+                    }
+                    onClick={() => testConnection(name)}
+                  >
+                    测试连接
+                  </Button>
                 </Tooltip>
                 <Button
                   danger={!clearKeys.includes(name)}
