@@ -294,6 +294,58 @@ h1 {
 .credential-controls .ant-form-item {
   margin-bottom: 20px;
 }
+.provider-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.provider-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 18px;
+  align-items: center;
+  padding: 16px 0;
+  border-bottom: 1px solid #e3eae7;
+}
+.provider-row:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+.provider-row:first-child {
+  padding-top: 4px;
+}
+.provider-info {
+  min-width: 0;
+}
+.provider-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.provider-title strong {
+  font-size: 15px;
+}
+.provider-title .ant-tag {
+  margin-inline-end: 0;
+}
+.provider-url {
+  margin-top: 5px;
+  color: #647780;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.provider-row > .ant-tag {
+  margin-inline-end: 0;
+}
+.provider-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.provider-actions .ant-btn {
+  min-width: 32px;
+}
 .settings-tabs {
   display: grid;
   grid-template-columns: 200px minmax(0, 1fr);
@@ -380,6 +432,13 @@ h1 {
   .credential-controls > .ant-space {
     padding: 0 0 20px;
   }
+  .provider-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+  .provider-actions {
+    justify-content: flex-end;
+  }
 }
 @media (max-width: 767px) {
   .sidebar,
@@ -447,6 +506,9 @@ h1 {
   }
   .ant-form-item {
     margin-bottom: 20px;
+  }
+  .ant-modal {
+    max-width: calc(100vw - 32px);
   }
   .form-footer {
     align-items: flex-start;

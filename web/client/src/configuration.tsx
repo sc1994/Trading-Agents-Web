@@ -1,4 +1,5 @@
 import { AutoComplete, Form, Input, Select } from "antd";
+import type { ProviderView } from "./api";
 
 export const providerLabels: Record<string, string> = {
   openai: "OpenAI",
@@ -34,6 +35,21 @@ export const languageOptions = [
   "繁體中文",
   "日本語",
 ].map((value) => ({ value, label: value }));
+// The default-supplier picker only offers joined entries; names come from the
+// joined list so custom suppliers appear under their saved name.
+export function providerOptions(providers: ProviderView[]) {
+  return providers.map((provider) => ({
+    value: provider.id,
+    label: provider.name,
+  }));
+}
+// Built-in suppliers that can still be joined, in catalog order.
+export function joinableBuiltIns(providers: ProviderView[]) {
+  const joined = new Set(providers.map((provider) => provider.id));
+  return Object.entries(providerLabels)
+    .filter(([id]) => !joined.has(id))
+    .map(([value, label]) => ({ value, label }));
+}
 // Curated choices mirror the server catalog. Custom-model providers accept an ID.
 const models: Record<string, [string[], string[]]> = {
   openai: [
