@@ -4,12 +4,73 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { ConfigProvider } from "antd";
 import { Start } from "./Start";
-import { fakeApi, navigate, resetApi, settings } from "../test/fixtures";
+import { customProviderId, fakeApi, navigate, resetApi, settings } from "../test/fixtures";
 
 beforeEach(resetApi);
+
+function renderStart() {
+  return render(
+    <ConfigProvider virtual={false}>
+      <Start api={fakeApi} navigate={navigate} />
+    </ConfigProvider>,
+  );
+}
+
+it("lists only joined suppliers in the analysis picker", async () => {
+  renderStart();
+  await userEvent.click(await screen.findByText("高级设置"));
+  await userEvent.click(screen.getByLabelText("模型供应商"));
+  const dropdown = await screen.findByRole("listbox");
+  expect(within(dropdown).getByText("OpenAI")).toBeInTheDocument();
+  expect(within(dropdown).getByText("本地推理")).toBeInTheDocument();
+  expect(within(dropdown).queryByText("Anthropic")).not.toBeInTheDocument();
+});
+
+it("allows a joined keyless custom endpoint", async () => {
+  vi.mocked(fakeApi.getSettings).mockResolvedValue({
+    ...structuredClone(settings),
+    provider: customProviderId,
+    quick_model: "local-fast",
+    deep_model: "local-deep",
+  });
+  renderStart();
+  await userEvent.type(await screen.findByLabelText("股票 / 资产代码"), "F");
+  await userEvent.click(screen.getByRole("button", { name: "开始分析" }));
+  await waitFor(() =>
+    expect(fakeApi.createTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: customProviderId,
+        quick_model: "local-fast",
+        deep_model: "local-deep",
+      }),
+    ),
+  );
+});
+
+it("switches from the built-in default to a joined custom supplier", async () => {
+  renderStart();
+  await userEvent.click(await screen.findByText("高级设置"));
+  await userEvent.click(screen.getByLabelText("模型供应商"));
+  await userEvent.click(await screen.findByText("本地推理"));
+  await userEvent.type(screen.getByLabelText("快速推理模型"), "qwen-local");
+  await userEvent.type(screen.getByLabelText("深度推理模型"), "qwen-deep");
+  await userEvent.type(await screen.findByLabelText("股票 / 资产代码"), "F");
+  await userEvent.click(screen.getByRole("button", { name: "开始分析" }));
+  await waitFor(() =>
+    expect(fakeApi.createTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: customProviderId,
+        quick_model: "qwen-local",
+        deep_model: "qwen-deep",
+      }),
+    ),
+  );
+});
 
 it("submits selected symbol instead of the English search name, preserving server defaults", async () => {
   render(<Start api={fakeApi} navigate={navigate} />);
@@ -155,10 +216,15 @@ it("rejects unselected company names instead of treating them as ticker symbols"
 
 it("requires a missing provider key before creating a task", async () => {
   vi.mocked(fakeApi.getSettings).mockResolvedValue({
-    ...settings,
-    keys: { openai: { configured: false, last4: null } },
+    ...structuredClone(settings),
+    keys: { ...settings.keys, openai: { configured: false, last4: null } },
+    providers: settings.providers.map((provider) =>
+      provider.id === "openai"
+        ? { ...provider, key: { configured: false, last4: null } }
+        : provider,
+    ),
   });
-  render(<Start api={fakeApi} navigate={navigate} />);
+  renderStart();
   await userEvent.type(await screen.findByLabelText("股票 / 资产代码"), "F");
   await userEvent.click(screen.getByRole("button", { name: "开始分析" }));
   expect(
