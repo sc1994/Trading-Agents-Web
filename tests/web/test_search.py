@@ -1,6 +1,29 @@
 from web.search import search_symbols
 
 
+def test_chinese_catalog_results_do_not_wait_for_yahoo(tmp_path):
+    from web.catalog import refresh_catalog
+
+    path = tmp_path / "assets.json"
+    refresh_catalog(path, fetch=lambda: [
+        ("SH", "600000", "浦发银行"),
+        ("SZ", "000001", "平安银行"),
+        ("HK", "00780", "同程旅行"),
+    ])
+
+    calls = []
+
+    def offline(query):
+        calls.append(query)
+        raise TimeoutError("Yahoo")
+
+    assert search_symbols("同程", lookup=offline, catalog_path=path) == {
+        "results": [{"symbol": "0780.HK", "name": "同程旅行", "exchange": "HKEX", "type": "EQUITY"}],
+        "unavailable": False,
+    }
+    assert calls == []
+
+
 def test_production_search_bounds_yahoo_request(monkeypatch):
     requests = []
 

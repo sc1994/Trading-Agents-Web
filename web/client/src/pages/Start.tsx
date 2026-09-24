@@ -252,8 +252,8 @@ export function Start({
                           : searchState === "loading"
                             ? "正在搜索…"
                             : searchState === "ready" && !results.length
-                              ? "未找到结果，可直接输入有效代码。"
-                              : "输入代码或英文名称；至少 2 个字符开始搜索。"}
+                              ? "未找到结果，可尝试输入有效代码。"
+                              : "输入代码或公司名称；至少 2 个字符开始搜索。"}
                     </span>
                   }
                 >
@@ -294,7 +294,7 @@ export function Start({
                   >
                     <Input
                       prefix={<SearchOutlined aria-hidden />}
-                      placeholder="NVDA、NVIDIA、BTC-USD"
+                      placeholder="NVDA、同程、BTC-USD"
                       autoComplete="off"
                     />
                   </AutoComplete>
