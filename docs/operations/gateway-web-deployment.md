@@ -72,6 +72,14 @@ Web 暂不支持 `openai_compatible`：界面不提供该选项，任务、默�
 16 MiB `/tmp` 与 `127.0.0.1:7681:8080`。构建和健康检查不读取模型密钥；
 生产凭据在私有入口的设置页配置，不加入构建参数、CI 环境或镜像。
 
+中文股票名称检索需要独立的标的目录刷新。经数据使用条款和运维授权后，在包含
+`docker-compose.gateway-web.yml` 的已核实仓库目录执行一次
+`timeout 180s docker compose -p trading-agents-web -f docker-compose.gateway-web.yml exec -T web python -m web.catalog`，
+并由宿主调度器每天执行同一命令。刷新在容器的持久卷写入 `assets.json`，失败时
+退出非零且保留旧文件；应监控退出码及文件更新时间，不要把第三方接口故障当成
+工作台健康检查故障。港股名单优先从东方财富获取，失败后尝试新浪；两者均失效时
+不发布不完整数据。升级前备份该文件，回退时它可被旧版本忽略。
+
 ### 持久卷、属主与首次迁移
 
 Compose 项目 `trading-agents-web` 的逻辑卷 `web-data` 默认命名为

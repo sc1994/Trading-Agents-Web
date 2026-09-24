@@ -33,6 +33,22 @@ it("submits selected symbol instead of the English search name, preserving serve
   expect(navigate).toHaveBeenCalledWith("/tasks/task-123");
 });
 
+it("searches a Chinese name and submits the selected market symbol", async () => {
+  vi.mocked(fakeApi.searchSymbols).mockResolvedValue({
+    results: [{ symbol: "0780.HK", name: "同程旅行", exchange: "HKEX", type: "EQUITY" }],
+    unavailable: false,
+  });
+  render(<Start api={fakeApi} navigate={navigate} />);
+  const input = await screen.findByLabelText("股票 / 资产代码");
+  expect(screen.getByText(/输入代码或公司名称/)).toBeInTheDocument();
+  await userEvent.type(input, "同程");
+  await userEvent.click(await screen.findByText("同程旅行"));
+  await userEvent.click(screen.getByRole("button", { name: "开始分析" }));
+  await waitFor(() => expect(fakeApi.createTask).toHaveBeenCalledWith(
+    expect.objectContaining({ ticker: "0780.HK", name: "同程旅行" }),
+  ));
+});
+
 it("debounces queries of at least two characters and aborts an obsolete request", async () => {
   vi.useFakeTimers();
   try {

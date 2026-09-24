@@ -175,6 +175,20 @@ def test_search_maps_results_and_validates_query(client, monkeypatch):
     assert client.get("/api/assets/search?q=a").status_code == 422
 
 
+def test_search_route_reads_published_chinese_snapshot(client, monkeypatch):
+    from web.catalog import refresh_catalog
+
+    refresh_catalog(client.app.state.data_dir / "assets.json", fetch=lambda: [
+        ("SH", "600000", "浦发银行"), ("SZ", "000001", "平安银行"),
+        ("HK", "00780", "同程旅行"),
+    ])
+    monkeypatch.setattr("web.search._yahoo_lookup", lambda _query: [])
+    assert client.get("/api/assets/search?q=同程").json() == {
+        "results": [{"symbol": "0780.HK", "name": "同程旅行", "exchange": "HKEX", "type": "EQUITY"}],
+        "unavailable": False,
+    }
+
+
 def test_sse_reconnect_replays_ordered_ids_without_raw_state(client):
     task_id = client.post("/api/tasks", json=PARAMS).json()["id"]
     await_task(client, task_id)
