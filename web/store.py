@@ -280,6 +280,13 @@ class Store:
         with self.transaction() as db:
             return {row["key"]: row["value"] for row in db.execute("SELECT key, value FROM settings")}
 
+    def has_unfinished_tasks_for_provider(self, provider: str) -> bool:
+        with self.transaction() as db:
+            return db.execute(
+                "SELECT 1 FROM tasks WHERE json_extract(params, '$.provider')=? "
+                "AND status IN ('queued','running','interrupted') LIMIT 1", (provider,)
+            ).fetchone() is not None
+
     def update_settings(self, changes: dict[str, str | None]) -> None:
         with self.transaction(immediate=True) as db:
             for key, value in changes.items():

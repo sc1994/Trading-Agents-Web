@@ -3,7 +3,7 @@ import os
 import pytest
 import requests
 
-from web.settings import SettingsService
+from web.settings import _CREDENTIAL_ENVS, WEB_PROVIDERS, SettingsService
 from web.store import Store
 from web.validation import validate_task
 
@@ -269,3 +269,145 @@ def test_connection_test_does_not_probe_unconfigured_or_custom_endpoints(tmp_pat
         service.test_connection("openai_compatible")
     with pytest.raises(ValueError, match="supported"):
         service.test_connection("http://127.0.0.1")
+
+
+def test_legacy_defaults_stored_keys_and_environment_keys_are_joined(tmp_path, monkeypatch):
+    for provider in WEB_PROVIDERS:
+        if env := _CREDENTIAL_ENVS.get(provider):
+            monkeypatch.delenv(env, raising=False)
+    monkeypatch.setenv("GOOGLE_API_KEY", "ambient-google-9876")
+    store = Store(tmp_path / "web.db")
+    store.update_settings({"provider": "anthropic", "key:openai": "stored-openai-1234"})
+    service = SettingsService(store)
+
+    providers = service.public()["providers"]
+    assert {item["id"] for item in providers} == {"anthropic", "openai", "google"}
+    assert all(item["kind"] == "built_in" and item["base_url"] is None for item in providers)
+    assert next(item for item in providers if item["id"] == "openai")["key"] == {
+        "configured": True, "last4": "1234"
+    }
+    assert "ambient-google-9876" not in str(providers)
+    assert "providers" not in store.get_settings()
+
+
+def test_custom_providers_have_stable_distinct_ids_and_secret_free_metadata(tmp_path):
+    store = Store(tmp_path / "web.db")
+    service = SettingsService(store)
+    first = service.add_provider({"kind": "custom", "name": "Desk", "base_url": "http://127.0.0.1:1234/v1/", "key": "secret-12345"})
+    second = service.add_provider({"kind": "custom", "name": "Cloud", "base_url": "https://gateway.example/v1", "key": "other-56789"})
+    entries = [item for item in second["providers"] if item["kind"] == "custom"]
+
+    assert {item["name"] for item in entries} == {"Desk", "Cloud"}
+    assert all(item["id"].startswith("custom:") for item in entries)
+    assert entries[0]["id"] != entries[1]["id"]
+    assert service.joined_provider(entries[0]["id"])["base_url"] == "http://127.0.0.1:1234/v1"
+    assert entries[0]["key"] == {"configured": True, "last4": "2345"}
+    assert "secret-12345" not in str(first) + str(second) + store.get_settings()["providers"]
+    assert store.get_settings()[f"key:{entries[0]['id']}"] == "secret-12345"
+    assert SettingsService(Store(tmp_path / "web.db")).public()["providers"] == second["providers"]
+
+
+@pytest.mark.parametrize("name", ["", "   ", "X" * 65, "openai", "DESK"])
+def test_custom_name_must_be_unique_nonempty_and_bounded(tmp_path, name):
+    service = SettingsService(Store(tmp_path / "web.db"))
+    service.add_provider({"kind": "custom", "name": "Desk", "base_url": "https://example.test/v1"})
+    before = service.store.get_settings()
+    with pytest.raises(ValueError, match="name"):
+        service.add_provider({"kind": "custom", "name": name, "base_url": "https://example.test/v1"})
+    assert service.store.get_settings() == before
+
+
+@pytest.mark.parametrize("url", ["", "ftp://example.com", "https://", "https://user:pass@example.com", "https://example.com/?x=1", "https://example.com/#hash", "http://example.com:xyz", "http://example.com:65536", "https://example.com/a b", "https://example.com\\other/path", "https://example.com/" + "a" * 2048])
+def test_custom_url_rejects_invalid_endpoints_without_mutation(tmp_path, url):
+    store = Store(tmp_path / "web.db")
+    with pytest.raises(ValueError, match="URL"):
+        SettingsService(store).add_provider({"kind": "custom", "name": "Desk", "base_url": url})
+    assert store.get_settings() == {}
+
+
+def test_built_in_join_is_unique_and_name_url_cannot_be_edited(tmp_path):
+    service = SettingsService(Store(tmp_path / "web.db"))
+    joined = service.add_provider({"kind": "built_in", "id": "mistral", "key": "mistral-secret"})
+    assert service.joined_provider("mistral") in joined["providers"]
+    with pytest.raises(ValueError, match="already joined"):
+        service.add_provider({"kind": "built_in", "id": "mistral"})
+    with pytest.raises(ValueError, match="supported"):
+        service.add_provider({"kind": "built_in", "id": "openai_compatible"})
+    with pytest.raises(ValueError, match="name|built-in"):
+        service.edit_provider("mistral", {"name": "Renamed"})
+    assert service.joined_provider("mistral")["key"]["last4"] == "cret"
+
+
+def test_join_rejects_name_collision_with_custom_provider(tmp_path):
+    service = SettingsService(Store(tmp_path / "web.db"))
+    service.add_provider({"kind": "custom", "name": "MISTRAL", "base_url": "https://gateway.example/v1"})
+    with pytest.raises(ValueError, match="name"):
+        service.add_provider({"kind": "built_in", "id": "mistral"})
+
+
+def test_edit_validation_keeps_metadata_and_key_unchanged(tmp_path):
+    store = Store(tmp_path / "web.db")
+    service = SettingsService(store)
+    service.add_provider({"kind": "custom", "name": "Desk", "base_url": "https://example.test/v1", "key": "before"})
+    provider = service.public()["providers"][-1]["id"]
+    before = store.get_settings()
+    with pytest.raises(ValueError, match="URL"):
+        service.edit_provider(provider, {"name": "Renamed", "base_url": "https://example.test:bad"})
+    assert store.get_settings() == before
+    with pytest.raises(ValueError, match="credential"):
+        service.edit_provider(provider, {"key": "key\nsecret"})
+    assert store.get_settings() == before
+
+
+def test_legacy_settings_patch_can_join_a_builtin_provider(tmp_path):
+    service = SettingsService(Store(tmp_path / "web.db"))
+    service.add_provider({"kind": "custom", "name": "Desk", "base_url": "https://example.test/v1"})
+    service.update({"keys": {"mistral": "legacy-key-1234"}})
+    assert service.joined_provider("mistral")["key"] == {"configured": True, "last4": "1234"}
+
+
+def test_edit_replaces_or_clears_key_without_leaking_it(tmp_path, monkeypatch):
+    monkeypatch.delenv("MISTRAL_API_KEY", raising=False)
+    store = Store(tmp_path / "web.db")
+    service = SettingsService(store)
+    service.add_provider({"kind": "built_in", "id": "mistral", "key": "old-secret-1234"})
+    assert service.edit_provider("mistral", {"key": ""})["providers"][-1]["key"]["last4"] == "1234"
+    replaced = service.edit_provider("mistral", {"key": "new-secret-5678"})
+    assert service.joined_provider("mistral")["key"]["last4"] == "5678"
+    assert "new-secret-5678" not in str(replaced)
+    assert service.edit_provider("mistral", {"clear_key": True})["providers"][-1]["key"] == {
+        "configured": False, "last4": None
+    }
+    assert "key:mistral" not in store.get_settings()
+    with pytest.raises(ValueError, match="key"):
+        service.edit_provider("mistral", {"key": "replacement", "clear_key": True})
+
+
+@pytest.mark.parametrize("status", ["queued", "running", "interrupted"])
+def test_removal_is_blocked_by_unfinished_task(tmp_path, status):
+    store = Store(tmp_path / "web.db")
+    service = SettingsService(store)
+    service.add_provider({"kind": "custom", "name": "Desk", "base_url": "http://localhost:1234/v1", "key": "private-key"})
+    provider = service.public()["providers"][-1]["id"]
+    task_id = store.create_task({"provider": provider})
+    with store.transaction(immediate=True) as db:
+        db.execute("UPDATE tasks SET status=? WHERE id=?", (status, task_id))
+    with pytest.raises(ValueError, match="unfinished"):
+        service.remove_provider(provider)
+    assert store.has_unfinished_tasks_for_provider(provider)
+    with store.transaction(immediate=True) as db:
+        db.execute("UPDATE tasks SET status='completed' WHERE id=?", (task_id,))
+    assert not store.has_unfinished_tasks_for_provider(provider)
+    service.remove_provider(provider)
+    assert provider not in {item["id"] for item in service.public()["providers"]}
+    assert f"key:{provider}" not in store.get_settings()
+
+
+def test_default_provider_cannot_be_removed_and_unknown_id_is_rejected(tmp_path):
+    service = SettingsService(Store(tmp_path / "web.db"))
+    with pytest.raises(ValueError, match="default"):
+        service.remove_provider("openai")
+    with pytest.raises(ValueError, match="joined"):
+        service.joined_provider("custom:missing")
+    with pytest.raises(ValueError, match="joined"):
+        service.remove_provider("custom:missing")
