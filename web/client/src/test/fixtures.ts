@@ -11,6 +11,7 @@ export const settings: SettingsView = {
     openai: { configured: true, last4: "abcd" },
     google: { configured: false, last4: null },
     fred: { configured: false, last4: null },
+    alpha_vantage: { configured: false, last4: null },
   },
 };
 export const task: TaskView = {
