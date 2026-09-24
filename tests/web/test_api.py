@@ -123,44 +123,41 @@ def test_missing_provider_key_rejected_before_enqueue(client, monkeypatch):
         ("POST", "/api/tasks/missing/rerun", None),
     ],
 )
-def test_cross_origin_writes_are_rejected(client, method, path, body):
-    for headers in (
-        {"Origin": "https://evil.example"},
-        {"Origin": "null"},
-        {"Sec-Fetch-Site": "cross-site"},
-    ):
-        response = client.request(method, path, json=body, headers=headers)
-        assert response.status_code == 403
-        assert "access-control-allow-origin" not in response.headers
+def test_cross_site_writes_are_rejected(client, method, path, body):
+    response = client.request(
+        method, path, json=body, headers={"Sec-Fetch-Site": "cross-site"}
+    )
+    assert response.status_code == 403
+    assert "access-control-allow-origin" not in response.headers
 
 
 @pytest.mark.parametrize(
     "headers",
     [
-        # Proxy keeps Host but terminates TLS; the browser still sends https Origin.
-        {"Host": "trading.suncheng.online", "X-Forwarded-Proto": "https",
-         "Origin": "https://trading.suncheng.online"},
+        # Non-browser client without Origin.
+        {},
+        # The reported failure: a tunnel entry on a non-standard port whose
+        # proxy strips the port from Host and speaks plain http upstream.
+        {
+            "Host": "taw.suncheng.online",
+            "X-Forwarded-Proto": "http",
+            "Origin": "https://taw.suncheng.online:81",
+            "Sec-Fetch-Site": "same-origin",
+        },
+        # TLS entry with the domain preserved.
         {"Host": "trading.suncheng.online",
-         "Forwarded": "for=192.0.2.60;proto=https;host=trading.suncheng.online",
-         "Origin": "https://trading.suncheng.online"},
+         "X-Forwarded-Proto": "https",
+         "Origin": "https://trading.suncheng.online",
+         "Sec-Fetch-Site": "same-origin"},
+        # Opaque or foreign Origins without Sec-Fetch-Site: entry access control
+        # is the proxy's job, so the app must not reject them here.
+        {"Origin": "null"},
+        {"Origin": "https://elsewhere.example"},
     ],
 )
-def test_writes_behind_tls_proxy_keep_the_browser_origin(client, headers):
+def test_writes_from_any_entry_point_are_allowed(client, headers):
     response = client.patch("/api/settings", json={}, headers=headers)
     assert response.status_code == 200
-
-
-def test_foreign_origin_writes_stay_rejected_behind_tls_proxy(client):
-    for headers in (
-        {"Origin": "https://evil.example", "X-Forwarded-Proto": "https"},
-        {
-            "Origin": "https://trading.suncheng.online",
-            "X-Forwarded-Proto": "https",
-            "Sec-Fetch-Site": "cross-site",
-        },
-    ):
-        response = client.patch("/api/settings", json={}, headers=headers)
-        assert response.status_code == 403
 
 
 def test_same_origin_writes_and_secret_safe_connection_test(client, monkeypatch):

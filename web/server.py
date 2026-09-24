@@ -4,7 +4,6 @@ import os
 import re
 from contextlib import asynccontextmanager
 from pathlib import Path
-from urllib.parse import urlsplit
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
@@ -20,57 +19,6 @@ from web.worker import TaskWorker
 
 STATIC_DIR = Path(__file__).parent / "client" / "dist"
 _FALLBACK_INDEX = Path(__file__).with_name("index.html")
-
-
-def _origin(value: str):
-    try:
-        parsed = urlsplit(value)
-        if (
-            parsed.scheme not in {"http", "https"}
-            or not parsed.hostname
-            or parsed.username
-            or parsed.password
-        ):
-            return None
-        if parsed.path or parsed.query or parsed.fragment:
-            return None
-        return (
-            parsed.scheme,
-            parsed.hostname,
-            parsed.port or (443 if parsed.scheme == "https" else 80),
-        )
-    except ValueError:
-        return None
-
-
-def _browser_origin(request: Request):
-    """Origin the browser used, as seen through a TLS-terminating reverse proxy.
-
-    Uvicorn receives the proxied plain-HTTP hop, so request.url alone reports the
-    internal scheme and rejects every browser write behind an https entry.
-    Forwarded headers cannot be set by page script (forbidden request headers),
-    so a proxy-supplied value still reflects the real browser origin.
-    """
-    proto = host = None
-    for element in reversed(request.headers.getlist("forwarded")):
-        for parameter in element.split(";"):
-            name, _, value = parameter.partition("=")
-            name = name.strip().lower()
-            value = value.strip().strip('"')
-            if name == "proto" and proto is None:
-                proto = value.lower()
-            elif name == "host" and host is None:
-                host = value
-    proto = proto or request.headers.get("x-forwarded-proto")
-    host = host or request.headers.get("x-forwarded-host") or request.headers.get("host")
-    port = request.headers.get("x-forwarded-port")
-    if not proto or not host:
-        return _origin(f"{request.url.scheme}://{request.url.netloc}")
-    host = host.split(",")[0].strip()
-    forwarded = f"{proto}://{host}"
-    if port and ":" not in host:
-        forwarded = f"{forwarded}:{port}"
-    return _origin(forwarded)
 
 
 def create_app(data_dir: Path | None = None, executor: GraphRunner | None = None) -> FastAPI:
@@ -99,15 +47,17 @@ def create_app(data_dir: Path | None = None, executor: GraphRunner | None = None
     @app.middleware("http")
     async def security(request: Request, call_next):
         response = None
-        if request.method not in {"GET", "HEAD", "OPTIONS"}:
-            origin = request.headers.get("origin")
-            expected = _browser_origin(request)
-            if request.headers.get("sec-fetch-site") == "cross-site" or (
-                origin is not None and (_origin(origin) is None or _origin(origin) != expected)
-            ):
-                response = JSONResponse(
-                    {"detail": "Cross-origin writes are forbidden"}, status_code=403
-                )
+        # Entry access control (Basic Auth, network allow-list) is owned by the
+        # reverse proxy in front of the app, never by host matching here: the
+        # workbench is reached through several proxy entries (domain, tunnel
+        # host:port) whose Host/Origin/scheme the proxy legitimately rewrites, so
+        # pinning any one of them breaks the others. Sec-Fetch-Site is set by the
+        # browser and cannot be forged by page script, so a genuinely cross-site
+        # write from another site is still refused.
+        if request.method not in {"GET", "HEAD", "OPTIONS"} and (
+            request.headers.get("sec-fetch-site") == "cross-site"
+        ):
+            response = JSONResponse({"detail": "Cross-site writes are forbidden"}, status_code=403)
         if response is None:
             response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
