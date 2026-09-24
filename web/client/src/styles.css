@@ -691,6 +691,28 @@ h1 {
   border-left: 3px solid #1f7a55;
   background: #f3f6f5;
 }
+.markdown table {
+  display: block;
+  width: 100%;
+  border-collapse: collapse;
+  margin: 16px 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.markdown th,
+.markdown td {
+  border: 1px solid #dce5e2;
+  padding: 8px 12px;
+  text-align: left;
+  vertical-align: top;
+}
+.markdown th {
+  background: #f3f6f5;
+  white-space: nowrap;
+}
+.markdown tbody tr:nth-child(even) {
+  background: #f8fbfa;
+}
 .markdown h1 {
   font-size: 23px;
 }

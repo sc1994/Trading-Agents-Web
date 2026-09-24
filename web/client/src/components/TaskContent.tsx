@@ -1,5 +1,6 @@
 import { Empty, Tabs, Tag } from "antd";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import type { TaskView } from "../api";
 
 export const ratingLabel = {
@@ -58,7 +59,11 @@ export const sectionLabel: Record<string, string> = {
 export function Markdown({ text }: { text: string }) {
   return (
     <div className="markdown">
-      <ReactMarkdown skipHtml components={{ img: () => null }}>
+      <ReactMarkdown
+        skipHtml
+        remarkPlugins={[remarkGfm]}
+        components={{ img: () => null }}
+      >
         {text}
       </ReactMarkdown>
     </div>
