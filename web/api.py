@@ -163,7 +163,10 @@ def create_task(body: TaskInput, request: Request):
     except ValueError as error:
         raise _invalid(error) from None
     params["name"] = body.name.strip()
-    task_id = request.app.state.store.create_task(params)
+    try:
+        task_id = request.app.state.store.create_task(params)
+    except ValueError as error:
+        raise _invalid(error) from None
     return _view(request, _get_task(request, task_id))
 
 
@@ -221,9 +224,9 @@ def rerun(task_id: str, request: Request):
     task = _get_task(request, task_id)
     try:
         request.app.state.settings.resolve_run_config(task["params"])
+        return _view(request, request.app.state.worker.rerun(task_id))
     except ValueError as error:
         raise _invalid(error) from None
-    return _view(request, request.app.state.worker.rerun(task_id))
 
 
 @router.delete("/tasks/{task_id}", status_code=204)

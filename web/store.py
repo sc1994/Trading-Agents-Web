@@ -128,6 +128,11 @@ class Store:
         encoded = _json(params)
         task_id, now = str(uuid4()), _now()
         with self.transaction(immediate=True) as db:
+            row = db.execute("SELECT value FROM settings WHERE key='providers'").fetchone()
+            if row is not None and "provider" in params and not any(
+                item.get("id") == params["provider"] for item in json.loads(row["value"])
+            ):
+                raise ValueError("provider must be joined")
             db.execute(
                 """INSERT INTO tasks (id, params, ticker, name, date, status, created_at, updated_at)
                    VALUES (?, ?, ?, ?, ?, 'queued', ?, ?)""",

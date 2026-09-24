@@ -3,6 +3,27 @@ import pytest
 from web.store import Store
 
 
+def test_task_insert_rechecks_joined_provider_after_deletion(tmp_path):
+    from web.settings import SettingsService
+
+    store = Store(tmp_path / "web.db")
+    service = SettingsService(store)
+    service.add_provider({"kind": "custom", "name": "Desk", "base_url": "http://localhost:1234/v1"})
+    provider = next(item["id"] for item in service.public()["providers"] if item["name"] == "Desk")
+    service.remove_provider(provider)
+
+    with pytest.raises(ValueError, match="provider.*joined"):
+        store.create_task({"provider": provider, "ticker": "NVDA"})
+    assert store.list_tasks() == []
+    assert store.create_task({"ticker": "NVDA"})
+
+
+def test_legacy_store_without_provider_metadata_accepts_existing_provider_params(tmp_path):
+    store = Store(tmp_path / "web.db")
+    task_id = store.create_task({"provider": "old-provider", "ticker": "NVDA"})
+    assert store.get_task(task_id)["params"]["provider"] == "old-provider"
+
+
 def test_claim_and_replay(tmp_path):
     store = Store(tmp_path / "web.db")
     first = store.create_task({"ticker": "NVDA", "date": "2026-09-22"})

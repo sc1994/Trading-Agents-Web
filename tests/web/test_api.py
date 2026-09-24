@@ -56,6 +56,50 @@ def test_health_and_secret_mask(client):
     )
 
 
+def test_task_creation_rechecks_provider_after_stale_api_precheck(client, monkeypatch):
+    service = client.app.state.settings
+    store = client.app.state.store
+    service.update({"keys": {"anthropic": "test-anthropic-secret"}})
+    original_create = store.create_task
+
+    def remove_before_insert(params):
+        service.remove_provider("anthropic")
+        return original_create(params)
+
+    monkeypatch.setattr(store, "create_task", remove_before_insert)
+    response = client.post("/api/tasks", json={**PARAMS, "provider": "anthropic",
+                                               "quick_model": "claude-sonnet-5",
+                                               "deep_model": "claude-sonnet-5"})
+
+    assert response.status_code == 422
+    assert "provider" in response.text
+    assert store.list_tasks() == []
+    assert "anthropic" not in {item["id"] for item in service.public()["providers"]}
+
+
+def test_rerun_rechecks_provider_after_stale_api_precheck(client, monkeypatch):
+    client.app.state.worker.stop()
+    service = client.app.state.settings
+    store = client.app.state.store
+    service.update({"keys": {"anthropic": "test-anthropic-secret"}})
+    task_id = store.create_task({"provider": "anthropic", "ticker": "NVDA",
+                                 "quick_model": "claude-sonnet-5", "deep_model": "claude-sonnet-5"})
+    with store.transaction(immediate=True) as db:
+        db.execute("UPDATE tasks SET status='failed' WHERE id=?", (task_id,))
+    original_create = store.create_task
+
+    def remove_before_insert(params):
+        service.remove_provider("anthropic")
+        return original_create(params)
+
+    monkeypatch.setattr(store, "create_task", remove_before_insert)
+    response = client.post(f"/api/tasks/{task_id}/rerun")
+
+    assert response.status_code == 422
+    assert "provider" in response.text
+    assert len(store.list_tasks()) == 1
+
+
 def test_create_filters_history_and_exports_only_persisted_public_report(client):
     response = client.post("/api/tasks", json=PARAMS)
     assert response.status_code == 201
