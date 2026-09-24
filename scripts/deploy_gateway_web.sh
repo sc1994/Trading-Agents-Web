@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 readonly project_name="trading-agents-web"
 readonly image_repository="trading-agents-web-ui"
+readonly probe_image="local/trading-agents-gateway-runner:20260923"
 readonly host_port="7681"
 readonly compose_file="docker-compose.gateway-web.yml"
 readonly candidate_readiness_seconds="30"
@@ -22,7 +23,7 @@ fi
 readonly image_ref="${image_repository}:${sha}"
 readonly candidate_name="trading-agents-web-candidate-${sha}-$$"
 
-for dependency in docker curl ss cmp mktemp rm sleep; do
+for dependency in docker cmp mktemp rm sleep; do
     if ! command -v "$dependency" >/dev/null 2>&1; then
         printf 'required command not found: %s\n' "$dependency" >&2
         exit 127
@@ -44,6 +45,20 @@ compose() {
         --project-name "$project_name" \
         --file "$compose_file" \
         "$@"
+}
+
+host_probe() {
+    local executable="$1"
+    shift
+    docker run \
+        --rm \
+        --network host \
+        --pull never \
+        --read-only \
+        --cap-drop ALL \
+        --security-opt no-new-privileges \
+        --entrypoint "$executable" \
+        "$probe_image" "$@"
 }
 
 tmp_dir=""
@@ -83,7 +98,7 @@ assert_deployment_port_available() {
     done <<< "$owner_lines"
 
     local listeners
-    listeners=$(ss -H -ltn "sport = :${host_port}")
+    listeners=$(host_probe ss -H -ltn "sport = :${host_port}")
     if [[ -n "$listeners" && "$project_web_owns_port" != true ]]; then
         printf 'port %s is occupied by a non-project process\n' "$host_port" >&2
         return 1
@@ -96,14 +111,13 @@ fetch_exact() {
     local output="$3"
     local status
 
-    curl \
+    host_probe curl \
         --fail \
         --silent \
         --show-error \
         --connect-timeout 2 \
         --max-time 5 \
-        --output "$output" \
-        "$url" || {
+        "$url" > "$output" || {
         status=$?
         printf 'request failed: %s\n' "$url" >&2
         return "$status"
