@@ -336,11 +336,53 @@ def test_keyless_custom_connection_uses_placeholder(tmp_path, monkeypatch):
     def fake_get(url, **kwargs):
         assert url == "http://localhost:1234/v1/models"
         assert kwargs == {"headers": {"Authorization": "Bearer EMPTY"},
-                          "timeout": (3, 5), "allow_redirects": False}
+                          "params": None, "timeout": (3, 5), "allow_redirects": False}
         return Response()
 
     monkeypatch.setattr(requests, "get", fake_get)
     assert service.test_connection(provider) == {"ok": True}
+
+
+@pytest.mark.parametrize(
+    "source,url,params,payload",
+    [
+        (
+            "fred",
+            "https://api.stlouisfed.org/fred/series",
+            {"series_id": "FEDFUNDS", "api_key": "saved-secret", "file_type": "json"},
+            {"seriess": [{"id": "FEDFUNDS"}]},
+        ),
+        (
+            "alpha_vantage",
+            "https://www.alphavantage.co/query",
+            {"function": "TIME_SERIES_DAILY", "symbol": "IBM", "apikey": "saved-secret"},
+            {"Time Series (Daily)": {"2026-09-22": {"4. close": "100"}}},
+        ),
+    ],
+)
+def test_data_source_connection_uses_saved_key_and_validates_data(
+    tmp_path, monkeypatch, source, url, params, payload
+):
+    monkeypatch.setenv("FRED_API_KEY", "environment-secret")
+    monkeypatch.setenv("ALPHA_VANTAGE_API_KEY", "environment-secret")
+    service = SettingsService(Store(tmp_path / "web.db"))
+    service.update({"keys": {source: "saved-secret"}})
+
+    class Response:
+        status_code = 200
+
+        def json(self):
+            return payload
+
+    def fake_get(request_url, **kwargs):
+        assert request_url == url
+        assert kwargs["params"] == params
+        assert kwargs["timeout"] == (3, 5)
+        assert kwargs["allow_redirects"] is False
+        return Response()
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    assert service.test_connection(source) == {"ok": True}
 
 
 def test_custom_defaults_require_explicit_models_and_task_uses_generic_catalog(tmp_path):
@@ -569,3 +611,40 @@ def test_default_provider_cannot_be_removed_and_unknown_id_is_rejected(tmp_path)
         service.joined_provider("custom:missing")
     with pytest.raises(ValueError, match="joined"):
         service.remove_provider("custom:missing")
+
+
+@pytest.mark.parametrize("source", ["fred", "alpha_vantage"])
+def test_data_source_connection_skips_missing_key(tmp_path, monkeypatch, source):
+    monkeypatch.delenv("FRED_API_KEY", raising=False)
+    monkeypatch.delenv("ALPHA_VANTAGE_API_KEY", raising=False)
+    service = SettingsService(Store(tmp_path / "web.db"))
+    monkeypatch.setattr(requests, "get", lambda *args, **kwargs: pytest.fail("Unexpected request"))
+
+    assert service.test_connection(source) == {"ok": False, "error": "Credential not configured"}
+
+
+@pytest.mark.parametrize(
+    "source,payload",
+    [
+        ("fred", {"error_message": "Invalid saved-secret"}),
+        ("alpha_vantage", {"Information": "API key saved-secret rate limit reached"}),
+        ("alpha_vantage", {"Error Message": "Invalid API key saved-secret"}),
+        ("alpha_vantage", {"Global Quote": {}}),
+    ],
+)
+def test_data_source_connection_rejects_error_and_empty_payloads(
+    tmp_path, monkeypatch, source, payload
+):
+    service = SettingsService(Store(tmp_path / "web.db"))
+    service.update({"keys": {source: "saved-secret"}})
+
+    class Response:
+        status_code = 200
+
+        def json(self):
+            return payload
+
+    monkeypatch.setattr(requests, "get", lambda *args, **kwargs: Response())
+    result = service.test_connection(source)
+    assert result == {"ok": False, "error": "Connection test failed"}
+    assert "saved-secret" not in str(result)

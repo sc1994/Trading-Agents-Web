@@ -230,15 +230,41 @@ def test_missing_provider_key_rejected_before_enqueue(client, monkeypatch):
         ("POST", "/api/tasks/missing/rerun", None),
     ],
 )
-def test_cross_origin_writes_are_rejected(client, method, path, body):
-    for headers in (
-        {"Origin": "https://evil.example"},
+def test_cross_site_writes_are_rejected(client, method, path, body):
+    response = client.request(
+        method, path, json=body, headers={"Sec-Fetch-Site": "cross-site"}
+    )
+    assert response.status_code == 403
+    assert "access-control-allow-origin" not in response.headers
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        # Non-browser client without Origin.
+        {},
+        # The reported failure: a tunnel entry on a non-standard port whose
+        # proxy strips the port from Host and speaks plain http upstream.
+        {
+            "Host": "taw.suncheng.online",
+            "X-Forwarded-Proto": "http",
+            "Origin": "https://taw.suncheng.online:81",
+            "Sec-Fetch-Site": "same-origin",
+        },
+        # TLS entry with the domain preserved.
+        {"Host": "trading.suncheng.online",
+         "X-Forwarded-Proto": "https",
+         "Origin": "https://trading.suncheng.online",
+         "Sec-Fetch-Site": "same-origin"},
+        # Opaque or foreign Origins without Sec-Fetch-Site: entry access control
+        # is the proxy's job, so the app must not reject them here.
         {"Origin": "null"},
-        {"Sec-Fetch-Site": "cross-site"},
-    ):
-        response = client.request(method, path, json=body, headers=headers)
-        assert response.status_code == 403
-        assert "access-control-allow-origin" not in response.headers
+        {"Origin": "https://elsewhere.example"},
+    ],
+)
+def test_writes_from_any_entry_point_are_allowed(client, headers):
+    response = client.patch("/api/settings", json={}, headers=headers)
+    assert response.status_code == 200
 
 
 def test_same_origin_writes_and_secret_safe_connection_test(client, monkeypatch):
@@ -280,6 +306,20 @@ def test_search_maps_results_and_validates_query(client, monkeypatch):
         "unavailable": False,
     }
     assert client.get("/api/assets/search?q=a").status_code == 422
+
+
+def test_search_route_reads_published_chinese_snapshot(client, monkeypatch):
+    from web.catalog import refresh_catalog
+
+    refresh_catalog(client.app.state.data_dir / "assets.json", fetch=lambda: [
+        ("SH", "600000", "浦发银行"), ("SZ", "000001", "平安银行"),
+        ("HK", "00780", "同程旅行"),
+    ])
+    monkeypatch.setattr("web.search._yahoo_lookup", lambda _query: [])
+    assert client.get("/api/assets/search?q=同程").json() == {
+        "results": [{"symbol": "0780.HK", "name": "同程旅行", "exchange": "HKEX", "type": "EQUITY"}],
+        "unavailable": False,
+    }
 
 
 def test_sse_reconnect_replays_ordered_ids_without_raw_state(client):

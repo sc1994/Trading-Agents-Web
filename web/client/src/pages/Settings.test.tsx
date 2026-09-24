@@ -82,17 +82,38 @@ it("replaces a joined key through the edit dialog without keeping it locally", a
   const input = await screen.findByLabelText("OpenAI API Key");
   expect(input).toHaveAttribute("type", "password");
   expect(input).toHaveValue("");
-  await userEvent.type(input, "replacement-secret");
-  await userEvent.click(screen.getByRole("button", { name: "保存" }));
+  expect(screen.getByText(/已配置 · 尾号 abcd/)).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "保存设置" }));
   await waitFor(() =>
-    expect(fakeApi.editProvider).toHaveBeenCalledWith("openai", {
-      key: "replacement-secret",
-    }),
+    expect(fakeApi.saveSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ keys: {}, clear_keys: [] }),
+    ),
   );
-  await waitFor(() =>
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+});
+
+it("guides data source key setup to the official application pages", async () => {
+  vi.mocked(fakeApi.getSettings).mockResolvedValue({
+    ...structuredClone(settings),
+    keys: {
+      ...structuredClone(settings.keys),
+      alpha_vantage: { configured: false, last4: null },
+    },
+  });
+  render(<Settings api={fakeApi} />);
+  await userEvent.click(await screen.findByRole("tab", { name: "数据源" }));
+
+  const fred = screen.getByLabelText("FRED API Key").closest(".ant-form-item");
+  const alpha = screen.getByLabelText("Alpha Vantage API Key").closest(".ant-form-item");
+  expect(fred).toHaveTextContent("填入后点击“保存设置”");
+  expect(alpha).toHaveTextContent("填入后点击“保存设置”");
+  expect(fred?.querySelector("a")).toHaveAttribute(
+    "href",
+    "https://fred.stlouisfed.org/docs/api/api_key.html",
   );
-  expect(localSpy).not.toHaveBeenCalled();
+  expect(alpha?.querySelector("a")).toHaveAttribute(
+    "href",
+    "https://www.alphavantage.co/support/#api-key",
+  );
 });
 
 it("keeps the existing key when the edit key is left blank", async () => {
@@ -210,6 +231,25 @@ it("omits blank keys and cleared data-source keys on save", async () => {
       expect.objectContaining({ keys: {}, clear_keys: ["alpha_vantage"] }),
     ),
   );
+});
+
+it.each(["FRED", "Alpha Vantage"])("tests the saved %s data source only on demand", async (label) => {
+  render(<Settings api={fakeApi} />);
+  await userEvent.click(await screen.findByRole("tab", { name: "数据源" }));
+  expect(fakeApi.testConnection).not.toHaveBeenCalled();
+  await userEvent.click(screen.getByRole("button", { name: `测试 ${label} 连接` }));
+  await waitFor(() => expect(fakeApi.testConnection).toHaveBeenCalledWith(
+    label === "FRED" ? "fred" : "alpha_vantage",
+  ));
+  expect(await screen.findByText(`${label} 连接成功`)).toBeInTheDocument();
+});
+
+it("requires saving a new data source key before testing it", async () => {
+  render(<Settings api={fakeApi} />);
+  await userEvent.click(await screen.findByRole("tab", { name: "数据源" }));
+  await userEvent.type(screen.getByLabelText("FRED API Key"), "new-secret");
+  expect(screen.getByRole("button", { name: "测试 FRED 连接" })).toBeDisabled();
+  expect(fakeApi.testConnection).not.toHaveBeenCalled();
 });
 
 it("keeps data-source edits available when saving settings fails", async () => {

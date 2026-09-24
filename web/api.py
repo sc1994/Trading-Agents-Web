@@ -147,9 +147,9 @@ def _invalid(error: ValueError) -> HTTPException:
 
 
 @router.get("/assets/search")
-def search(q: str = Query(min_length=2, max_length=64)):
+def search(request: Request, q: str = Query(min_length=2, max_length=64)):
     try:
-        return search_symbols(q)
+        return search_symbols(q, catalog_path=request.app.state.data_dir / "assets.json")
     except ValueError as error:
         raise _invalid(error) from None
 

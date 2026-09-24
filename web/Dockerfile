@@ -19,7 +19,7 @@ COPY pyproject.toml README.md ./
 COPY tradingagents ./tradingagents
 COPY cli ./cli
 COPY web/*.py ./web/
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir '.[search]'
 COPY --from=ui /src/web/client/dist ./web/client/dist
 RUN test -s web/client/dist/index.html && \
     groupadd --gid 10001 web && \

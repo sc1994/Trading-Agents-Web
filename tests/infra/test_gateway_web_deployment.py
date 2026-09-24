@@ -233,7 +233,7 @@ def test_image_packages_the_built_client_and_single_worker_python_runtime() -> N
     assert "npm run build && test -s dist/index.html" in recipe
     assert "FROM python:3.12-slim" in recipe
     assert "COPY tradingagents ./tradingagents" in recipe
-    assert "pip install --no-cache-dir ." in recipe
+    assert "pip install --no-cache-dir '.[search]'" in recipe
     assert "COPY --from=ui /src/web/client/dist ./web/client/dist" in recipe
     assert "TRADINGAGENTS_WEB_DATA_DIR=/var/lib/tradingagents-web" in recipe
     command = next(line.removeprefix("CMD ") for line in recipe.splitlines() if line.startswith("CMD "))

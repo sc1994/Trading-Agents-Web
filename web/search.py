@@ -2,8 +2,11 @@
 
 import time
 from collections.abc import Callable
+from pathlib import Path
 
 import yfinance as yf
+
+from web.catalog import search_catalog
 
 _CACHE_SECONDS = 600
 _MAX_RESULTS = 8
@@ -16,12 +19,16 @@ def _yahoo_lookup(query: str, **kwargs) -> list[dict]:
                      recommended=0, timeout=5).quotes
 
 
-def search_symbols(query: str, lookup: Callable | None = None) -> dict:
+def search_symbols(query: str, lookup: Callable | None = None, catalog_path: Path | None = None) -> dict:
     """Return public quote fields, preserving Yahoo relevance except exact ticker matches."""
     if not isinstance(query, str) or not 2 <= len(query.strip()) <= 64:
         raise ValueError("query must contain between 2 and 64 characters")
 
     query = query.strip()
+    local = search_catalog(catalog_path, query) if catalog_path is not None else []
+    # Cached Yahoo responses must not hide a newly published local snapshot.
+    if local:
+        return {"results": local, "unavailable": False}
     lookup = lookup or _yahoo_lookup
     now = time.monotonic()
     key = (lookup, query.casefold())

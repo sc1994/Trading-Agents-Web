@@ -50,6 +50,11 @@ interface DialogValues {
   base_url?: string;
 }
 
+const dataSourceKeyPages: Record<string, string> = {
+  fred: "https://fred.stlouisfed.org/docs/api/api_key.html",
+  alpha_vantage: "https://www.alphavantage.co/support/#api-key",
+};
+
 export function Settings({ api }: { api: WebApi }) {
   const [form] = Form.useForm<SettingsChanges>();
   const screens = Grid.useBreakpoint();
@@ -130,7 +135,7 @@ export function Settings({ api }: { api: WebApi }) {
       setSaving(false);
     }
   }
-  async function testConnection(item: ProviderView) {
+  async function testConnection(item: { id: string; name: string }) {
     setTesting(item.id);
     setNotice(undefined);
     try {
@@ -158,9 +163,9 @@ export function Settings({ api }: { api: WebApi }) {
       });
     }
   }
-  function credentialFields() {
-    const entries = Object.entries(settings?.keys ?? {}).filter(([name]) =>
-      ["fred", "alpha_vantage"].includes(name),
+  function credentialFields(dataSource: boolean) {
+    const entries = Object.entries(settings?.keys ?? {}).filter(
+      ([name]) => ["fred", "alpha_vantage"].includes(name) === dataSource,
     );
     return (
       <div>
@@ -188,7 +193,23 @@ export function Settings({ api }: { api: WebApi }) {
               <Form.Item
                 label={`${keyLabel(name)} API Key`}
                 htmlFor={`key-${name}`}
-                extra="留空保留原密钥；输入新值后保存以替换。"
+                extra={
+                  dataSource ? (
+                    <>
+                      前往{" "}
+                      <a
+                        href={dataSourceKeyPages[name]}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        {keyLabel(name)} 官网申请 API Key
+                      </a>
+                      ，填入后点击“保存设置”；留空保留原密钥。
+                    </>
+                  ) : (
+                    "留空保留原密钥；输入新值后保存以替换。"
+                  )
+                }
               >
                 <Input.Password
                   id={`key-${name}`}
@@ -206,6 +227,20 @@ export function Settings({ api }: { api: WebApi }) {
                 />
               </Form.Item>
               <Space wrap>
+                <Tooltip title="仅测试服务器已保存的密钥；更改后请先保存">
+                  <Button
+                    aria-label={`测试 ${keyLabel(name)} 连接`}
+                    loading={testing === name}
+                    disabled={
+                      !!testing ||
+                      !!passwords[name] ||
+                      clearKeys.includes(name)
+                    }
+                    onClick={() => testConnection({ id: name, name: keyLabel(name) })}
+                  >
+                    测试连接
+                  </Button>
+                </Tooltip>
                 <Button
                   danger={!clearKeys.includes(name)}
                   icon={<DeleteOutlined />}
@@ -389,7 +424,7 @@ export function Settings({ api }: { api: WebApi }) {
                     <p className="muted">
                       Yahoo 标的搜索无需 API Key。其他数据源按需配置。
                     </p>
-                    {credentialFields()}
+                    {credentialFields(true)}
                   </Card>
                 ),
               },

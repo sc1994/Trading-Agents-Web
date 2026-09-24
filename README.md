@@ -18,12 +18,25 @@ memory and checkpoint ownership metadata in its `web-data` named volume at
 `/var/lib/tradingagents-web`. Enter provider credentials in Settings after private access
 is established; stored keys and backups remain sensitive plaintext server data.
 
-For local development, install `.[dev]`, run `npm --prefix web/client ci` and
+For local development, install `.[dev,search]`, run `npm --prefix web/client ci` and
 `npm --prefix web/client run build`, then run `python -m web.server` (port 8080).
 Set `TRADINGAGENTS_WEB_DATA_DIR` to a private writable directory; never run multiple workers
 or replicas against it. See the [deployment and recovery runbook](docs/operations/gateway-web-deployment.md)
 for release gates, volume ownership, backup/restore and upgrades. This documentation does
 not authorize a production deployment.
+
+Chinese equity-name search uses a local snapshot, not a live third-party call during
+search. After installation, run `python -m web.catalog` once and schedule it daily
+with the deployment's scheduler under the same user and `TRADINGAGENTS_WEB_DATA_DIR`
+as the web service. It publishes `assets.json` in that directory atomically; failed
+or incomplete updates retain the previous snapshot. Without a snapshot, Yahoo
+symbol/English-name search still works. The updater uses AKShare's Shanghai and
+Shenzhen A-share lists and its Eastmoney Hong Kong quote list, falling back to
+the Sina Hong Kong list if Eastmoney is unavailable. It includes ordinary
+HK codes, not special counters, and deliberately excludes Beijing listings until
+their Yahoo ticker support is verified. AKShare's MIT software license does not
+grant rights to redistribute the upstream market data; review source terms before
+commercial deployment.
 
 ---
 

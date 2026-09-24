@@ -4,7 +4,6 @@ import os
 import re
 from contextlib import asynccontextmanager
 from pathlib import Path
-from urllib.parse import urlsplit
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
@@ -20,27 +19,6 @@ from web.worker import TaskWorker
 
 STATIC_DIR = Path(__file__).parent / "client" / "dist"
 _FALLBACK_INDEX = Path(__file__).with_name("index.html")
-
-
-def _origin(value: str):
-    try:
-        parsed = urlsplit(value)
-        if (
-            parsed.scheme not in {"http", "https"}
-            or not parsed.hostname
-            or parsed.username
-            or parsed.password
-        ):
-            return None
-        if parsed.path or parsed.query or parsed.fragment:
-            return None
-        return (
-            parsed.scheme,
-            parsed.hostname,
-            parsed.port or (443 if parsed.scheme == "https" else 80),
-        )
-    except ValueError:
-        return None
 
 
 def create_app(data_dir: Path | None = None, executor: GraphRunner | None = None) -> FastAPI:
@@ -69,15 +47,17 @@ def create_app(data_dir: Path | None = None, executor: GraphRunner | None = None
     @app.middleware("http")
     async def security(request: Request, call_next):
         response = None
-        if request.method not in {"GET", "HEAD", "OPTIONS"}:
-            origin = request.headers.get("origin")
-            expected = _origin(f"{request.url.scheme}://{request.url.netloc}")
-            if request.headers.get("sec-fetch-site") == "cross-site" or (
-                origin is not None and (_origin(origin) is None or _origin(origin) != expected)
-            ):
-                response = JSONResponse(
-                    {"detail": "Cross-origin writes are forbidden"}, status_code=403
-                )
+        # Entry access control (Basic Auth, network allow-list) is owned by the
+        # reverse proxy in front of the app, never by host matching here: the
+        # workbench is reached through several proxy entries (domain, tunnel
+        # host:port) whose Host/Origin/scheme the proxy legitimately rewrites, so
+        # pinning any one of them breaks the others. Sec-Fetch-Site is set by the
+        # browser and cannot be forged by page script, so a genuinely cross-site
+        # write from another site is still refused.
+        if request.method not in {"GET", "HEAD", "OPTIONS"} and (
+            request.headers.get("sec-fetch-site") == "cross-site"
+        ):
+            response = JSONResponse({"detail": "Cross-site writes are forbidden"}, status_code=403)
         if response is None:
             response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
