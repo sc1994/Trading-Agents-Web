@@ -134,6 +134,35 @@ def test_cross_origin_writes_are_rejected(client, method, path, body):
         assert "access-control-allow-origin" not in response.headers
 
 
+@pytest.mark.parametrize(
+    "headers",
+    [
+        # Proxy keeps Host but terminates TLS; the browser still sends https Origin.
+        {"Host": "trading.suncheng.online", "X-Forwarded-Proto": "https",
+         "Origin": "https://trading.suncheng.online"},
+        {"Host": "trading.suncheng.online",
+         "Forwarded": "for=192.0.2.60;proto=https;host=trading.suncheng.online",
+         "Origin": "https://trading.suncheng.online"},
+    ],
+)
+def test_writes_behind_tls_proxy_keep_the_browser_origin(client, headers):
+    response = client.patch("/api/settings", json={}, headers=headers)
+    assert response.status_code == 200
+
+
+def test_foreign_origin_writes_stay_rejected_behind_tls_proxy(client):
+    for headers in (
+        {"Origin": "https://evil.example", "X-Forwarded-Proto": "https"},
+        {
+            "Origin": "https://trading.suncheng.online",
+            "X-Forwarded-Proto": "https",
+            "Sec-Fetch-Site": "cross-site",
+        },
+    ):
+        response = client.patch("/api/settings", json={}, headers=headers)
+        assert response.status_code == 403
+
+
 def test_same_origin_writes_and_secret_safe_connection_test(client, monkeypatch):
     assert (
         client.patch("/api/settings", json={}, headers={"Origin": "http://testserver"}).status_code
