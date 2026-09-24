@@ -2,7 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ConfigProvider } from "antd";
 import { Settings } from "./Settings";
-import { fakeApi, resetApi } from "../test/fixtures";
+import { fakeApi, resetApi, settings } from "../test/fixtures";
 
 beforeEach(resetApi);
 
@@ -25,6 +25,31 @@ it("shows only masked key status and omits blank keys on save", async () => {
     expect(fakeApi.saveSettings).toHaveBeenCalledWith(
       expect.objectContaining({ keys: {}, clear_keys: [] }),
     ),
+  );
+});
+
+it("guides data source key setup to the official application pages", async () => {
+  vi.mocked(fakeApi.getSettings).mockResolvedValue({
+    ...structuredClone(settings),
+    keys: {
+      ...structuredClone(settings.keys),
+      alpha_vantage: { configured: false, last4: null },
+    },
+  });
+  render(<Settings api={fakeApi} />);
+  await userEvent.click(await screen.findByRole("tab", { name: "数据源" }));
+
+  const fred = screen.getByLabelText("FRED API Key").closest(".ant-form-item");
+  const alpha = screen.getByLabelText("Alpha Vantage API Key").closest(".ant-form-item");
+  expect(fred).toHaveTextContent("填入后点击“保存设置”");
+  expect(alpha).toHaveTextContent("填入后点击“保存设置”");
+  expect(fred?.querySelector("a")).toHaveAttribute(
+    "href",
+    "https://fred.stlouisfed.org/docs/api/api_key.html",
+  );
+  expect(alpha?.querySelector("a")).toHaveAttribute(
+    "href",
+    "https://www.alphavantage.co/support/#api-key",
   );
 });
 

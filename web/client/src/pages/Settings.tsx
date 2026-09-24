@@ -28,6 +28,11 @@ import {
   providerLabels,
 } from "../configuration";
 
+const dataSourceKeyPages: Record<string, string> = {
+  fred: "https://fred.stlouisfed.org/docs/api/api_key.html",
+  alpha_vantage: "https://www.alphavantage.co/support/#api-key",
+};
+
 export function Settings({ api }: { api: WebApi }) {
   const [form] = Form.useForm<SettingsChanges>();
   const screens = Grid.useBreakpoint();
@@ -149,7 +154,23 @@ export function Settings({ api }: { api: WebApi }) {
               <Form.Item
                 label={`${keyLabel(name)} API Key`}
                 htmlFor={`key-${name}`}
-                extra="留空保留原密钥；输入新值后保存以替换。"
+                extra={
+                  dataSource ? (
+                    <>
+                      前往{" "}
+                      <a
+                        href={dataSourceKeyPages[name]}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        {keyLabel(name)} 官网申请 API Key
+                      </a>
+                      ，填入后点击“保存设置”；留空保留原密钥。
+                    </>
+                  ) : (
+                    "留空保留原密钥；输入新值后保存以替换。"
+                  )
+                }
               >
                 <Input.Password
                   id={`key-${name}`}
