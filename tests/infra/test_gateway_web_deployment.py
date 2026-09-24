@@ -13,6 +13,7 @@ SCRIPT = ROOT / "scripts/deploy_gateway_web.sh"
 INDEX = ROOT / "web/index.html"
 GITEA_WORKFLOW = ROOT / ".gitea/workflows/deploy-gateway-web.yml"
 CI_WORKFLOW = ROOT / ".github/workflows/ci.yml"
+RUNNER_DOCKERFILE = ROOT / "infra/gateway-runner.Dockerfile"
 PINNED_CHECKOUT = re.compile(r"actions/checkout@[0-9a-f]{40}")
 SHA = "a" * 40
 OLD_SHA = "b" * 40
@@ -40,6 +41,16 @@ def workflow_command_data(node: object) -> list[object]:
         for value in node:
             selected.extend(workflow_command_data(value))
     return selected
+
+
+def test_gateway_runner_image_provides_deployment_tools() -> None:
+    dockerfile = RUNNER_DOCKERFILE.read_text(encoding="utf-8")
+    assert dockerfile.startswith("FROM node:24-alpine\n")
+    assert "apk add --no-cache" in dockerfile
+    for package in (
+        "bash", "curl", "docker-cli", "docker-cli-buildx", "docker-cli-compose", "git", "iproute2"
+    ):
+        assert re.search(rf"\b{package}\b", dockerfile)
 
 
 def test_gitea_workflow_is_restricted_to_gateway_main() -> None:
@@ -249,6 +260,18 @@ import tempfile
 
 name = Path(sys.argv[0]).name
 args = sys.argv[1:]
+invoked = [name, *args]
+probe_prefix = [
+    "run", "--rm", "--network", "host", "--pull", "never",
+    "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+    "--entrypoint",
+]
+if name == "docker" and args[:len(probe_prefix)] == probe_prefix:
+    executable = args[len(probe_prefix)]
+    image = args[len(probe_prefix) + 1]
+    if image == "local/trading-agents-gateway-runner:20260923" and executable in {"ss", "curl"}:
+        name = executable
+        args = args[len(probe_prefix) + 2:]
 env = os.environ
 log_path = Path(env["FAKE_COMMAND_LOG"])
 previous_records = []
@@ -259,6 +282,7 @@ if log_path.exists():
     ]
 record = {
     "command": [name, *args],
+    "invoked": invoked,
     "allowed": False,
     "image": env.get("TRADINGAGENTS_WEB_IMAGE", ""),
     "revision": env.get("TRADINGAGENTS_WEB_REVISION", ""),
@@ -413,20 +437,17 @@ elif name == "docker-compose":
 elif name == "curl":
     curl_prefix = [
         "--fail", "--silent", "--show-error",
-        "--connect-timeout", "2", "--max-time", "5", "--output",
+        "--connect-timeout", "2", "--max-time", "5",
     ]
-    if len(args) == 10 and args[:8] == curl_prefix:
-        output = Path(args[8])
-        url = args[9]
+    if len(args) == 8 and args[:7] == curl_prefix:
+        url = args[7]
         allowed_urls = {
             "http://127.0.0.1:49152/healthz",
             "http://127.0.0.1:49152/",
             "http://127.0.0.1:7681/healthz",
             "http://127.0.0.1:7681/",
         }
-        if url in allowed_urls and output.resolve().is_relative_to(
-            Path(env["TMPDIR"]).resolve()
-        ):
+        if url in allowed_urls:
             allow()
             candidate = ":49152" in url
             health = url.endswith("/healthz")
@@ -466,13 +487,13 @@ elif name == "curl":
             elif not candidate and health and new_release and env.get("FAKE_LIVE_HEALTH") == "fail":
                 exit_code = 22
             elif health:
-                output.write_bytes(b"ok\n")
+                stdout = "ok\n"
             elif candidate and env.get("FAKE_CANDIDATE_PAGE", "ok") != "ok":
-                output.write_bytes(b"wrong candidate page\n")
+                stdout = "wrong candidate page\n"
             elif not candidate and new_release and env.get("FAKE_LIVE_PAGE", "ok") != "ok":
-                output.write_bytes(b"wrong live page\n")
+                stdout = "wrong live page\n"
             else:
-                output.write_bytes(Path(env["FAKE_INDEX"] if candidate or new_release else env["FAKE_OLD_INDEX"]).read_bytes())
+                stdout = Path(env["FAKE_INDEX"] if candidate or new_release else env["FAKE_OLD_INDEX"]).read_text()
 elif name == "ss":
     if args == ["-H", "-ltn", "sport = :7681"]:
         allow()
@@ -620,6 +641,25 @@ def test_candidate_is_verified_before_cutover(fake_commands: FakeCommands) -> No
     assert first_up["revision"] == SHA
     assert sum(call == compose_up for call in invoked) == 1
     assert not any(call[-2:] == ["stop", "web"] for call in invoked)
+
+
+def test_loopback_probes_use_host_network_without_mounts(fake_commands: FakeCommands) -> None:
+    result = fake_commands.run()
+
+    assert result.returncode == 0, result.stderr
+    probes = [
+        call["invoked"] for call in fake_commands.calls()
+        if call["command"][0] in {"curl", "ss"}
+    ]
+    assert len(probes) == 5
+    for probe in probes:
+        assert probe[:7] == [
+            "docker", "run", "--rm", "--network", "host", "--pull", "never",
+        ]
+        assert "--volume" not in probe
+        assert "--privileged" not in probe
+        assert "--entrypoint" in probe
+    assert all(probe[-1].startswith("http://127.0.0.1:") for probe in probes[1:])
 
 
 def test_candidate_failure_never_calls_cutover(fake_commands: FakeCommands) -> None:

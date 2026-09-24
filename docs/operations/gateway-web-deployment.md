@@ -11,7 +11,52 @@ SHA 和镜像 revision，并保留候选验证及自动回退保护。
 Compose 仅绑定 `127.0.0.1:7681:8080`，但回环绑定**不是隐私保证**：既有反向代理、
 隧道或转发端口仍可能将无登录的工作台公开。是否开放公开代理入口是单独的运维决策，
 须由获授权的维护者独立评估访问边界；自动发布不表示已审核或更改代理配置。
-本次文档与工作流变更不授权 SSH、代理/网关配置变更或手动生产操作。
+自动发布不修改代理配置或公开入口。
+
+### gateway Runner 执行环境
+
+现有 `gitea-runner-gatway` 继续承担 `ubuntu-latest` 和 `emailbill`，仅新增完整规格
+`gateway:docker://local/trading-agents-gateway-runner:20260923`。从
+`infra/gateway-runner.Dockerfile` 构建该本机镜像；它提供 Node、Git、Bash、curl、
+Docker CLI、Buildx、Compose 和 `ss`。在激活标签前，必须先核对网关身份、Runner
+Compose 服务及配置挂载、镜像内命令和 `127.0.0.1:7681` 占用状态。现有注册文件
+`/data/.runner` 不得读取、删除或重新注册；配置文件 `runner.labels` 必须填写
+`ubuntu-latest:docker://docker-cli:latest`、`emailbill:docker://docker-cli:latest`
+及上述 `gateway` 完整规格，再只重建 Runner 服务。修改前备份配置并保留权限；
+重建后确认原 Runner 身份和原有两个标签均不变。回退时从备份恢复配置，仅重建
+Runner 服务，保留工作台的服务和数据卷。
+
+本机预置顺序（仅在更新后的脚本已进入 Gitea `main` 时执行）：
+
+1. 用运维清单的 SSH 配置解析 `billsys`，在连接内核对 `hostname=billsys`、
+   `id -un=root`、`pwd=/root`；确认 `code/gitea-runner` 正在运行，实际挂载为
+   `/wd/apps/vols/gitea/runner/config.yaml:/config.yaml` 和 Runner 数据目录，
+   Docker 监听者及宿主机 `ss` 均显示 `7681` 未被无关进程占用。
+2. 从已经合并的 GitHub `main` 取得 `infra/gateway-runner.Dockerfile`，经受控
+   `scp -F /home/ai/.ssh/paseo-ops/config` 复制到网关单独创建的临时目录。网关
+   使用 `docker build --pull=false -f <临时目录>/Dockerfile -t
+   local/trading-agents-gateway-runner:20260923 <临时目录>` 构建；记录镜像 ID。
+   执行 `docker image inspect` 核对该 tag，并从只挂 Docker socket 的隔离容器
+   验证 `docker buildx version`、`docker compose version`、`git --version` 和
+   宿主网络辅助容器内的 `ss -H -ltn 'sport = :7681'`。Runner 和 Docker CLI
+   必须访问同一宿主 Docker daemon，不能在其他机器只构建相同名字的镜像。
+3. 核对配置文件当前仅包含已确认的 Runner 设置，备份
+   `/wd/apps/vols/gitea/runner/config.yaml` 并保留权限。使用 YAML 解析器
+   在原配置添加完整 `runner.labels` 三项，不修改 `container.valid_volumes`、
+   Compose 其他服务或 `.runner` 注册文件。运行
+   `docker compose -f /wd/apps/docker/dockge/code/compose.yaml -p code up -d
+   --no-deps --no-build gitea-runner`，只更新这一服务。
+4. 确认原 Runner ID 在线、`ubuntu-latest` 和 `emailbill` 保留、`gateway`
+   指向已核对的本机镜像；再确认等待任务及本服务容器、镜像 revision 和
+   `127.0.0.1:7681/healthz`。任一步异常都停止扩大变更，依据备份恢复配置并
+   仅重建 Runner 服务，不手动启动或覆盖工作台服务。
+
+Runner 任务容器保持现有隔离网络。部署脚本只对宿主机端口监听和回环 HTTP 校验
+启动短生命周期 `--network host` 探测容器；该容器只读、丢弃 capabilities、没有
+卷挂载，且禁止拉取未知镜像。响应由标准输出回传任务容器供逐字节比对。任务容器
+内的 `127.0.0.1` 不是网关宿主机，不能直接用于正式服务健康检查。必须在更新的
+部署脚本进入 Gitea `main` 后才激活 `gateway` 标签，否则已有排队任务会执行旧
+脚本并错误访问任务容器自己的回环地址。
 
 Web 暂不支持 `openai_compatible`：界面不提供该选项，任务、默认设置和连接测试
 均拒绝它，浏览器不能提供任意后端 URL。CLI 的现有能力不受影响。
@@ -80,10 +125,11 @@ UID 10001 读写后，再安排切换；原卷保留用于恢复。
 使用对应旧 SHA 验证后再安排切换。禁止 `docker compose down --volumes` 和全局 prune。
 健康检查不证明真实模型/行情连接可用；连接测试须由用户在设置页显式触发。
 
-## 历史首次上线流程（仅供参考，不适用于当前自动发布）
+## 已废弃的首次上线记录（不得执行）
 
-以下阶段记录旧版首次上线流程，**不是当前自动发布需要执行的步骤**；其中的人工
-门禁、手动触发描述不得作为当前发布策略或工作流配置的依据。备份与回退说明见上文。
+以下所有阶段是旧版首次上线记录，**不得作为当前发布或 Runner 配置操作指令执行**。
+包括下文总则的授权/停止条件和阶段 2 的 UI 标签操作均已失效；以本页上面的
+“gateway Runner 执行环境”与当前用户授权为准。备份与回退说明见上文。
 
 本手册原先记录 `Trading-Agents-Web` 网关 Web 的首次上线边界。GitHub
 `sc1994/Trading-Agents-Web` 的 `main` 是唯一权威源；Gitea
