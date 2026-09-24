@@ -12,6 +12,27 @@ export interface KeyStatus {
   configured: boolean;
   last4: string | null;
 }
+export type ProviderKind = "built_in" | "custom";
+export interface ProviderView {
+  id: string;
+  name: string;
+  kind: ProviderKind;
+  base_url: string | null;
+  key: KeyStatus;
+}
+export interface ProviderInput {
+  kind: ProviderKind;
+  id?: string;
+  name?: string;
+  base_url?: string;
+  key?: string;
+}
+export interface ProviderEdit {
+  name?: string;
+  base_url?: string;
+  key?: string;
+  clear_key?: boolean;
+}
 export interface SettingsView {
   provider: string;
   quick_model: string;
@@ -19,6 +40,7 @@ export interface SettingsView {
   language: string;
   checkpoint_enabled: boolean;
   keys: Record<string, KeyStatus>;
+  providers: ProviderView[];
 }
 export interface SettingsChanges extends Partial<Omit<SettingsView, "keys">> {
   keys?: Record<string, string>;
@@ -75,6 +97,9 @@ export interface WebApi {
   createTask(params: TaskParams): Promise<TaskView>;
   getSettings(): Promise<SettingsView>;
   saveSettings(changes: SettingsChanges): Promise<SettingsView>;
+  addProvider(input: ProviderInput): Promise<SettingsView>;
+  editProvider(id: string, input: ProviderEdit): Promise<SettingsView>;
+  removeProvider(id: string): Promise<SettingsView>;
   testConnection(provider: string): Promise<{ ok: boolean; error?: string }>;
 }
 export interface TaskFilters {
@@ -178,6 +203,18 @@ export const webApi: WebApi = {
   getSettings: () => request("/settings"),
   saveSettings: (changes) =>
     request("/settings", { method: "PATCH", body: JSON.stringify(changes) }),
+  addProvider: (input) =>
+    request("/settings/providers", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  editProvider: (id, input) =>
+    request(`/settings/providers/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    }),
+  removeProvider: (id) =>
+    request(`/settings/providers/${encodeURIComponent(id)}`, { method: "DELETE" }),
   testConnection: (provider) =>
     request("/settings/test-connection", {
       method: "POST",

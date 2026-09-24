@@ -3,6 +3,7 @@
 import json
 import os
 import sqlite3
+from collections.abc import Callable
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -127,6 +128,11 @@ class Store:
         encoded = _json(params)
         task_id, now = str(uuid4()), _now()
         with self.transaction(immediate=True) as db:
+            row = db.execute("SELECT value FROM settings WHERE key='providers'").fetchone()
+            if row is not None and "provider" in params and not any(
+                item.get("id") == params["provider"] for item in json.loads(row["value"])
+            ):
+                raise ValueError("provider must be joined")
             db.execute(
                 """INSERT INTO tasks (id, params, ticker, name, date, status, created_at, updated_at)
                    VALUES (?, ?, ?, ?, ?, 'queued', ?, ?)""",
@@ -280,14 +286,39 @@ class Store:
         with self.transaction() as db:
             return {row["key"]: row["value"] for row in db.execute("SELECT key, value FROM settings")}
 
+    def has_unfinished_tasks_for_provider(self, provider: str) -> bool:
+        with self.transaction() as db:
+            return self._has_unfinished_tasks_for_provider(db, provider)
+
+    @staticmethod
+    def _has_unfinished_tasks_for_provider(db: sqlite3.Connection, provider: str) -> bool:
+        return db.execute(
+            "SELECT 1 FROM tasks WHERE json_extract(params, '$.provider')=? "
+            "AND status IN ('queued','running','interrupted') LIMIT 1", (provider,)
+        ).fetchone() is not None
+
+    @staticmethod
+    def _write_settings(db: sqlite3.Connection, changes: dict[str, str | None]) -> None:
+        for key, value in changes.items():
+            if value is None:
+                db.execute("DELETE FROM settings WHERE key=?", (key,))
+            else:
+                db.execute(
+                    "INSERT INTO settings (key, value) VALUES (?, ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                    (key, value),
+                )
+
+    def mutate_settings(
+        self,
+        mutate: Callable[[dict[str, str], Callable[[str], bool]], dict[str, str | None]],
+    ) -> None:
+        """Read, validate, and write settings under the same task-serializing lock."""
+        with self.transaction(immediate=True) as db:
+            saved = {row["key"]: row["value"] for row in db.execute("SELECT key, value FROM settings")}
+            changes = mutate(saved, lambda provider: self._has_unfinished_tasks_for_provider(db, provider))
+            self._write_settings(db, changes)
+
     def update_settings(self, changes: dict[str, str | None]) -> None:
         with self.transaction(immediate=True) as db:
-            for key, value in changes.items():
-                if value is None:
-                    db.execute("DELETE FROM settings WHERE key=?", (key,))
-                else:
-                    db.execute(
-                        "INSERT INTO settings (key, value) VALUES (?, ?) "
-                        "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-                        (key, value),
-                    )
+            self._write_settings(db, changes)

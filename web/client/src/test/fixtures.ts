@@ -1,6 +1,8 @@
 import { vi } from "vitest";
 import type { SettingsView, TaskView, WebApi } from "../api";
 
+export const customProviderId =
+  "custom:11111111-1111-4111-8111-111111111111";
 export const settings: SettingsView = {
   provider: "openai",
   quick_model: "gpt-5.6-luna",
@@ -11,8 +13,24 @@ export const settings: SettingsView = {
     openai: { configured: true, last4: "abcd" },
     google: { configured: false, last4: null },
     fred: { configured: false, last4: null },
-    alpha_vantage: { configured: false, last4: null },
+    alpha_vantage: { configured: true, last4: "wxyz" },
   },
+  providers: [
+    {
+      id: "openai",
+      name: "OpenAI",
+      kind: "built_in",
+      base_url: null,
+      key: { configured: true, last4: "abcd" },
+    },
+    {
+      id: customProviderId,
+      name: "本地推理",
+      kind: "custom",
+      base_url: "http://localhost:1234/v1",
+      key: { configured: false, last4: null },
+    },
+  ],
 };
 export const task: TaskView = {
   id: "task-123",
@@ -46,6 +64,9 @@ export const fakeApi: WebApi = {
   getSettings: vi.fn(),
   saveSettings: vi.fn(),
   testConnection: vi.fn(),
+  addProvider: vi.fn(),
+  editProvider: vi.fn(),
+  removeProvider: vi.fn(),
 };
 export const navigate = vi.fn();
 export function resetApi() {
@@ -64,6 +85,9 @@ export function resetApi() {
   vi.mocked(fakeApi.deleteTask).mockResolvedValue(undefined);
   vi.mocked(fakeApi.getSettings).mockResolvedValue(structuredClone(settings));
   vi.mocked(fakeApi.saveSettings).mockResolvedValue(structuredClone(settings));
+  vi.mocked(fakeApi.addProvider).mockResolvedValue(structuredClone(settings));
+  vi.mocked(fakeApi.editProvider).mockResolvedValue(structuredClone(settings));
+  vi.mocked(fakeApi.removeProvider).mockResolvedValue(structuredClone(settings));
   vi.mocked(fakeApi.searchSymbols).mockResolvedValue({
     results: [
       {

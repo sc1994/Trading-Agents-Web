@@ -28,7 +28,7 @@ import {
   languageOptions,
   ModelFields,
   modelDefaults,
-  providerLabels,
+  providerOptions,
 } from "../configuration";
 
 const today = () => {
@@ -127,11 +127,13 @@ export function Start({
   async function submit(values: StartValues) {
     setError("");
     if (!settings) return;
+    const joined = settings.providers.find((item) => item.id === provider);
     if (
+      joined?.kind === "built_in" &&
       !["ollama", "bedrock"].includes(provider) &&
-      !settings.keys[provider]?.configured
+      !joined.key.configured
     ) {
-      const message = `请先在设置中配置 ${providerLabels[provider] ?? provider} API Key。`;
+      const message = `请先在设置中配置 ${joined.name} API Key。`;
       form.setFields([{ name: "provider", errors: [message] }]);
       setError(message);
       return;
@@ -396,9 +398,7 @@ export function Start({
                           rules={[{ required: true }]}
                         >
                           <Select
-                            options={Object.entries(providerLabels).map(
-                              ([value, label]) => ({ value, label }),
-                            )}
+                            options={providerOptions(settings.providers)}
                             onChange={(value) =>
                               form.setFieldsValue(modelDefaults(value))
                             }
@@ -495,7 +495,9 @@ export function Start({
             <Card title="当前默认配置">
               <Space direction="vertical" size="middle">
                 <Tag color="success">
-                  {providerLabels[settings.provider] ?? settings.provider}
+                  {settings.providers.find(
+                    (item) => item.id === settings.provider,
+                  )?.name ?? settings.provider}
                 </Tag>
                 <div>
                   <span className="muted">快速推理模型</span>

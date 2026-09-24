@@ -56,9 +56,32 @@ class ConnectionInput(InputModel):
     provider: str
 
 
+class ProviderCreateInput(InputModel):
+    kind: Literal["built_in", "custom"]
+    id: str | None = None
+    name: str | None = None
+    base_url: str | None = None
+    key: str | None = None
+
+
+class ProviderEditInput(InputModel):
+    name: str | None = None
+    base_url: str | None = None
+    key: str | None = None
+    clear_key: bool = False
+
+
 class KeyStatus(BaseModel):
     configured: bool
     last4: str | None
+
+
+class ProviderView(BaseModel):
+    id: str
+    name: str
+    kind: Literal["built_in", "custom"]
+    base_url: str | None
+    key: KeyStatus
 
 
 class SettingsView(BaseModel):
@@ -68,6 +91,7 @@ class SettingsView(BaseModel):
     language: str
     checkpoint_enabled: bool
     keys: dict[str, KeyStatus]
+    providers: list[ProviderView]
 
 
 class TaskView(BaseModel):
@@ -143,6 +167,30 @@ def update_settings(body: SettingsInput, request: Request):
         raise _invalid(error) from None
 
 
+@router.post("/settings/providers", response_model=SettingsView)
+def add_provider(body: ProviderCreateInput, request: Request):
+    try:
+        return request.app.state.settings.add_provider(body.model_dump(exclude_unset=True))
+    except ValueError as error:
+        raise _invalid(error) from None
+
+
+@router.patch("/settings/providers/{provider_id}", response_model=SettingsView)
+def edit_provider(provider_id: str, body: ProviderEditInput, request: Request):
+    try:
+        return request.app.state.settings.edit_provider(provider_id, body.model_dump(exclude_unset=True))
+    except ValueError as error:
+        raise _invalid(error) from None
+
+
+@router.delete("/settings/providers/{provider_id}", response_model=SettingsView)
+def remove_provider(provider_id: str, request: Request):
+    try:
+        return request.app.state.settings.remove_provider(provider_id)
+    except ValueError as error:
+        raise _invalid(error) from None
+
+
 @router.post("/settings/test-connection")
 def test_connection(body: ConnectionInput, request: Request):
     try:
@@ -163,7 +211,10 @@ def create_task(body: TaskInput, request: Request):
     except ValueError as error:
         raise _invalid(error) from None
     params["name"] = body.name.strip()
-    task_id = request.app.state.store.create_task(params)
+    try:
+        task_id = request.app.state.store.create_task(params)
+    except ValueError as error:
+        raise _invalid(error) from None
     return _view(request, _get_task(request, task_id))
 
 
@@ -221,9 +272,9 @@ def rerun(task_id: str, request: Request):
     task = _get_task(request, task_id)
     try:
         request.app.state.settings.resolve_run_config(task["params"])
+        return _view(request, request.app.state.worker.rerun(task_id))
     except ValueError as error:
         raise _invalid(error) from None
-    return _view(request, request.app.state.worker.rerun(task_id))
 
 
 @router.delete("/tasks/{task_id}", status_code=204)
