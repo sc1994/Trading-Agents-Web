@@ -70,7 +70,7 @@ const running = {
     bull_history: "生态系统与经常性收入提供增长支持。",
   },
 };
-const settings = {
+const settingsFixture = {
   provider: "openai",
   quick_model: "gpt-5.6-luna",
   deep_model: "gpt-5.6",
@@ -82,6 +82,23 @@ const settings = {
     fred: { configured: false, last4: null },
   },
 };
+let providers = [
+  {
+    id: "openai",
+    name: "OpenAI",
+    kind: "built_in",
+    base_url: null,
+    key: { configured: true, last4: "abcd" },
+  },
+  {
+    id: "custom:11111111-1111-4111-8111-111111111111",
+    name: "本地推理",
+    kind: "custom",
+    base_url: "http://localhost:1234/v1",
+    key: { configured: false, last4: null },
+  },
+];
+const currentSettings = () => ({ ...settingsFixture, providers });
 const history = [
   task,
   running,
@@ -134,7 +151,26 @@ try {
     await page.route("**/api/**", async (route) => {
       const url = new URL(route.request().url());
       const json = (value) => route.fulfill({ json: value });
-      if (url.pathname === "/api/settings") return json(settings);
+      if (url.pathname === "/api/settings") return json(currentSettings());
+      if (url.pathname === "/api/settings/providers") {
+        if (route.request().method() === "POST") {
+          const body = JSON.parse(route.request().postData() || "{}");
+          if (body.kind === "custom")
+            providers = [
+              ...providers,
+              {
+                id: `custom:${crypto.randomUUID()}`,
+                name: body.name,
+                kind: "custom",
+                base_url: body.base_url,
+                key: { configured: Boolean(body.key), last4: null },
+              },
+            ];
+        }
+        return json(currentSettings());
+      }
+      if (url.pathname.startsWith("/api/settings/providers/"))
+        return json(currentSettings());
       if (url.pathname === "/api/assets/search")
         return json({ results: [], unavailable: false });
       if (url.pathname.endsWith("/events")) {
@@ -210,6 +246,62 @@ try {
       await page.screenshot({
         path: path.join(output, `IMPLEMENTED-task-8-${name}-${device}.png`),
       });
+      if (name === "settings") {
+        // Provider management: open the join dialog, assert the built-in
+        // picker appears for the built-in kind, then submit a keyless
+        // custom endpoint and observe the compact joined row.
+        await page.evaluate(() => window.scrollTo(0, 0));
+        await page.getByRole("button", { name: "加入供应商" }).click();
+        await expect(page.getByRole("dialog")).toBeVisible();
+        await expect(page.getByLabel("名称")).toBeVisible();
+        await page.evaluate(() => document.fonts.ready);
+        await page.screenshot({
+          path: path.join(
+            output,
+            `IMPLEMENTED-provider-management-join-dialog-${device}.png`,
+          ),
+        });
+        await page.getByRole("button", { name: "取消" }).click();
+        await expect(page.getByRole("dialog")).toBeHidden();
+        await page.getByRole("button", { name: "加入供应商" }).click();
+        await expect(page.getByRole("dialog")).toBeVisible();
+        const kindSelect = page.locator(".ant-modal [role='combobox']").first();
+        await kindSelect.focus();
+        await page.keyboard.press("Enter");
+        const builtInOption = page.locator(
+          '.ant-select-item-option[title="内置供应商"]',
+        );
+        await expect(builtInOption).toBeVisible();
+        await page.keyboard.press("ArrowDown");
+        await page.keyboard.press("Enter");
+        await expect(page.getByLabel("选择内置供应商")).toBeVisible();
+        await page.getByRole("button", { name: "取消" }).click();
+        await expect(page.getByRole("dialog")).toBeHidden();
+        await page.getByRole("button", { name: "加入供应商" }).click();
+        await expect(page.getByRole("dialog")).toBeVisible();
+        await page.getByLabel("名称").fill("浏览器网关");
+        await page.getByLabel("接口地址").fill("http://localhost:1234/v1");
+        await page.getByRole("button", { name: "保存", exact: true }).click();
+        await expect(page.getByText("浏览器网关")).toBeVisible();
+        await expect(page.getByRole("dialog")).toBeHidden();
+        await page.evaluate(() => document.fonts.ready);
+        const overflowAfterJoin = await page.evaluate(
+          () => document.documentElement.scrollWidth > innerWidth,
+        );
+        expect(
+          overflowAfterJoin,
+          `settings/${device} must not overflow after joining a supplier`,
+        ).toBe(false);
+        await page.screenshot({
+          path: path.join(
+            output,
+            `IMPLEMENTED-provider-management-settings-${device}.png`,
+          ),
+        });
+        console.log(
+          `PASS ${name}/${device}: join dialog, compact row and no overflow`,
+        );
+      }
       if (device === "mobile") {
         await page.evaluate(() =>
           window.scrollTo(0, document.body.scrollHeight),
