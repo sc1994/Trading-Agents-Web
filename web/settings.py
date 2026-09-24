@@ -66,6 +66,7 @@ def _base_url(value: object) -> str:
         parsed = urlsplit(value)
         if (parsed.scheme not in {"http", "https"} or not parsed.hostname
                 or parsed.username is not None or parsed.password is not None
+                or parsed.netloc.endswith(":")
                 or parsed.port is not None and not 1 <= parsed.port <= 65535
                 or parsed.query or parsed.fragment):
             raise ValueError("invalid provider URL")
@@ -125,70 +126,76 @@ class SettingsService:
     def add_provider(self, body: dict) -> dict:
         if not isinstance(body, dict) or body.get("kind") not in ("built_in", "custom"):
             raise ValueError("provider kind must be supported")
-        saved = self.store.get_settings()
-        providers = self._providers(saved)
-        if body["kind"] == "built_in":
-            if set(body) - {"kind", "id", "key"}:
-                raise ValueError("unsupported provider field")
-            id = body.get("id")
-            if not isinstance(id, str) or id not in WEB_PROVIDERS:
-                raise ValueError("provider must be supported")
-            if any(item["id"] == id for item in providers):
-                raise ValueError("provider is already joined")
-            item = _built_in(id)
-            _provider_name(item["name"], providers)
-        else:
-            if set(body) - {"kind", "name", "base_url", "key"}:
-                raise ValueError("unsupported provider field")
-            item = {"id": f"custom:{uuid4()}", "kind": "custom",
-                    "name": _provider_name(body.get("name"), providers),
-                    "base_url": _base_url(body.get("base_url"))}
-        changes = {"providers": json.dumps([*providers, item], ensure_ascii=False)}
-        if "key" in body and (key := _credential(body["key"])):
-            changes[f"key:{item['id']}"] = key
-        self.store.update_settings(changes)
+        def mutate(saved: dict[str, str], _unfinished) -> dict[str, str | None]:
+            providers = self._providers(saved)
+            if body["kind"] == "built_in":
+                if set(body) - {"kind", "id", "key"}:
+                    raise ValueError("unsupported provider field")
+                id = body.get("id")
+                if not isinstance(id, str) or id not in WEB_PROVIDERS:
+                    raise ValueError("provider must be supported")
+                if any(item["id"] == id for item in providers):
+                    raise ValueError("provider is already joined")
+                item = _built_in(id)
+                _provider_name(item["name"], providers)
+            else:
+                if set(body) - {"kind", "name", "base_url", "key"}:
+                    raise ValueError("unsupported provider field")
+                item = {"id": f"custom:{uuid4()}", "kind": "custom",
+                        "name": _provider_name(body.get("name"), providers),
+                        "base_url": _base_url(body.get("base_url"))}
+            changes = {"providers": json.dumps([*providers, item], ensure_ascii=False)}
+            if "key" in body and (key := _credential(body["key"])):
+                changes[f"key:{item['id']}"] = key
+            return changes
+
+        self.store.mutate_settings(mutate)
         return self.public()
 
     def edit_provider(self, id: str, body: dict) -> dict:
         if not isinstance(body, dict) or set(body) - {"name", "base_url", "key", "clear_key"}:
             raise ValueError("unsupported provider field")
-        saved = self.store.get_settings()
-        providers = self._providers(saved)
-        item = next((item for item in providers if item["id"] == id), None)
-        if item is None:
-            raise ValueError("provider is not joined")
-        if item["kind"] == "built_in" and ({"name", "base_url"} & body.keys()):
-            raise ValueError("built-in provider name and URL cannot be changed")
-        if "name" in body:
-            item["name"] = _provider_name(body["name"], providers, excluding=id)
-        if "base_url" in body:
-            item["base_url"] = _base_url(body["base_url"])
-        if "clear_key" in body and type(body["clear_key"]) is not bool:
-            raise ValueError("clear_key must be a boolean")
-        if body.get("clear_key") and "key" in body:
-            raise ValueError("key replacement and clear_key are mutually exclusive")
-        changes = {"providers": json.dumps(providers, ensure_ascii=False)}
-        if "key" in body and (key := _credential(body["key"])):
-            changes[f"key:{id}"] = key
-        if body.get("clear_key"):
-            changes[f"key:{id}"] = None
-        self.store.update_settings(changes)
+        def mutate(saved: dict[str, str], _unfinished) -> dict[str, str | None]:
+            providers = self._providers(saved)
+            item = next((item for item in providers if item["id"] == id), None)
+            if item is None:
+                raise ValueError("provider is not joined")
+            if item["kind"] == "built_in" and ({"name", "base_url"} & body.keys()):
+                raise ValueError("built-in provider name and URL cannot be changed")
+            if "name" in body:
+                item["name"] = _provider_name(body["name"], providers, excluding=id)
+            if "base_url" in body:
+                item["base_url"] = _base_url(body["base_url"])
+            if "clear_key" in body and type(body["clear_key"]) is not bool:
+                raise ValueError("clear_key must be a boolean")
+            if body.get("clear_key") and "key" in body:
+                raise ValueError("key replacement and clear_key are mutually exclusive")
+            changes = {"providers": json.dumps(providers, ensure_ascii=False)}
+            if "key" in body and (key := _credential(body["key"])):
+                changes[f"key:{id}"] = key
+            if body.get("clear_key"):
+                changes[f"key:{id}"] = None
+            return changes
+
+        self.store.mutate_settings(mutate)
         return self.public()
 
     def remove_provider(self, id: str) -> dict:
-        saved = self.store.get_settings()
-        providers = self._providers(saved)
-        if not any(item["id"] == id for item in providers):
-            raise ValueError("provider is not joined")
-        if saved.get("provider", "openai") == id:
-            raise ValueError("cannot remove the default provider")
-        if self.store.has_unfinished_tasks_for_provider(id):
-            raise ValueError("cannot remove provider used by unfinished tasks")
-        self.store.update_settings({
-            "providers": json.dumps([item for item in providers if item["id"] != id],
-                                    ensure_ascii=False),
-            f"key:{id}": None,
-        })
+        def mutate(saved: dict[str, str], unfinished) -> dict[str, str | None]:
+            providers = self._providers(saved)
+            if not any(item["id"] == id for item in providers):
+                raise ValueError("provider is not joined")
+            if saved.get("provider", "openai") == id:
+                raise ValueError("cannot remove the default provider")
+            if unfinished(id):
+                raise ValueError("cannot remove provider used by unfinished tasks")
+            return {
+                "providers": json.dumps([item for item in providers if item["id"] != id],
+                                        ensure_ascii=False),
+                f"key:{id}": None,
+            }
+
+        self.store.mutate_settings(mutate)
         return self.public()
 
     def public(self) -> dict:
@@ -250,16 +257,23 @@ class SettingsService:
                 update[f"key:{name}"] = key
         for name in clear_keys:
             update[f"key:{name}"] = None
-        newly_joined = [name for name in keys if name in WEB_PROVIDERS
-                        and f"key:{name}" in update]
-        providers = self._providers(self.store.get_settings())
-        for name in newly_joined:
-            if not any(item["id"] == name for item in providers):
-                item = _built_in(name)
-                _provider_name(item["name"], providers)
-                providers.append(item)
-                update["providers"] = json.dumps(providers, ensure_ascii=False)
-        self.store.update_settings(update)
+        newly_joined = list(dict.fromkeys(
+            ([provider] if "provider" in changes else []) +
+            [name for name in keys if name in WEB_PROVIDERS and f"key:{name}" in update]
+        ))
+
+        def mutate(saved: dict[str, str], _unfinished) -> dict[str, str | None]:
+            providers = self._providers(saved)
+            writes = update.copy()
+            for name in newly_joined:
+                if not any(item["id"] == name for item in providers):
+                    item = _built_in(name)
+                    _provider_name(item["name"], providers)
+                    providers.append(item)
+                    writes["providers"] = json.dumps(providers, ensure_ascii=False)
+            return writes
+
+        self.store.mutate_settings(mutate)
         return self.public()
 
     def resolve_run_config(self, params: dict) -> dict:

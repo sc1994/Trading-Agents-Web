@@ -1,4 +1,7 @@
 import os
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 
 import pytest
 import requests
@@ -317,7 +320,7 @@ def test_custom_name_must_be_unique_nonempty_and_bounded(tmp_path, name):
     assert service.store.get_settings() == before
 
 
-@pytest.mark.parametrize("url", ["", "ftp://example.com", "https://", "https://user:pass@example.com", "https://example.com/?x=1", "https://example.com/#hash", "http://example.com:xyz", "http://example.com:65536", "https://example.com/a b", "https://example.com\\other/path", "https://example.com/" + "a" * 2048])
+@pytest.mark.parametrize("url", ["", "ftp://example.com", "https://", "https://user:pass@example.com", "https://example.com/?x=1", "https://example.com/#hash", "http://example.com:xyz", "http://example.com:", "http://example.com:65536", "https://example.com/a b", "https://example.com\\other/path", "https://example.com/" + "a" * 2048])
 def test_custom_url_rejects_invalid_endpoints_without_mutation(tmp_path, url):
     store = Store(tmp_path / "web.db")
     with pytest.raises(ValueError, match="URL"):
@@ -364,6 +367,72 @@ def test_legacy_settings_patch_can_join_a_builtin_provider(tmp_path):
     service.add_provider({"kind": "custom", "name": "Desk", "base_url": "https://example.test/v1"})
     service.update({"keys": {"mistral": "legacy-key-1234"}})
     assert service.joined_provider("mistral")["key"] == {"configured": True, "last4": "1234"}
+
+
+def test_legacy_default_patch_joins_provider_without_key(tmp_path):
+    service = SettingsService(Store(tmp_path / "web.db"))
+    service.add_provider({"kind": "custom", "name": "Desk", "base_url": "https://example.test/v1"})
+    result = service.update({"provider": "anthropic"})
+    assert result["provider"] == "anthropic"
+    assert service.joined_provider("anthropic") in result["providers"]
+
+
+def test_concurrent_joins_preserve_both_metadata_and_keys(tmp_path):
+    barrier = threading.Barrier(2)
+
+    class InterleavedStore(Store):
+        def get_settings(self):
+            result = super().get_settings()
+            if threading.current_thread().name.startswith("join") and not getattr(
+                threading.current_thread(), "first_read_done", False
+            ):
+                threading.current_thread().first_read_done = True
+                barrier.wait(timeout=5)
+            return result
+
+    store = InterleavedStore(tmp_path / "web.db")
+    service = SettingsService(store)
+    service.add_provider({"kind": "custom", "name": "Initial", "base_url": "https://initial.example/v1"})
+
+    def join(name):
+        service.add_provider({"kind": "custom", "name": name,
+                              "base_url": "https://gateway.example/v1", "key": name + "-secret"})
+
+    with ThreadPoolExecutor(max_workers=2, thread_name_prefix="join") as executor:
+        futures = [executor.submit(join, name) for name in ("Desk", "Cloud")]
+        for future in futures:
+            future.result(timeout=10)
+    providers = service.public()["providers"]
+    assert {item["name"] for item in providers if item["kind"] == "custom"} == {
+        "Initial", "Desk", "Cloud"
+    }
+    assert all(f"key:{item['id']}" in store.get_settings()
+               for item in providers if item["name"] in {"Desk", "Cloud"})
+
+
+def test_task_arriving_at_delete_transaction_prevents_removal(tmp_path, monkeypatch):
+    store = Store(tmp_path / "web.db")
+    service = SettingsService(store)
+    service.add_provider({"kind": "custom", "name": "Desk", "base_url": "https://gateway.example/v1",
+                          "key": "desk-secret"})
+    id = service.public()["providers"][-1]["id"]
+    original = store.transaction
+    injected = False
+
+    @contextmanager
+    def interleaved_transaction(*, immediate=False):
+        nonlocal injected
+        if immediate and not injected:
+            injected = True
+            store.create_task({"provider": id})
+        with original(immediate=immediate) as db:
+            yield db
+
+    monkeypatch.setattr(store, "transaction", interleaved_transaction)
+    with pytest.raises(ValueError, match="unfinished"):
+        service.remove_provider(id)
+    assert store.has_unfinished_tasks_for_provider(id)
+    assert service.joined_provider(id)["key"]["configured"]
 
 
 def test_edit_replaces_or_clears_key_without_leaking_it(tmp_path, monkeypatch):
