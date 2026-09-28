@@ -508,6 +508,28 @@ def test_legacy_default_patch_joins_provider_without_key(tmp_path):
     assert service.joined_provider("anthropic") in result["providers"]
 
 
+def test_stale_custom_provider_update_fails_after_provider_is_deleted(tmp_path, monkeypatch):
+    service = SettingsService(Store(tmp_path / "web.db"))
+    provider = service.add_provider({
+        "kind": "custom",
+        "name": "Desk",
+        "base_url": "https://example.test/v1",
+    })["providers"][-1]["id"]
+    original_joined_provider = service.joined_provider
+
+    def delete_after_prevalidation(id):
+        selected = original_joined_provider(id)
+        service.remove_provider(id)
+        return selected
+
+    monkeypatch.setattr(service, "joined_provider", delete_after_prevalidation)
+    with pytest.raises(ValueError, match="joined"):
+        service.update({"provider": provider, "quick_model": "fast", "deep_model": "deep"})
+
+    assert provider not in {item["id"] for item in service.public()["providers"]}
+    assert f"key:{provider}" not in service.store.get_settings()
+
+
 def test_concurrent_joins_preserve_both_metadata_and_keys(tmp_path):
     barrier = threading.Barrier(2)
 

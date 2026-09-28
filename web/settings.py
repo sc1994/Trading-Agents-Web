@@ -275,8 +275,14 @@ class SettingsService:
 
         def mutate(saved: dict[str, str], _unfinished) -> dict[str, str | None]:
             providers = self._providers(saved)
+            if provider not in WEB_PROVIDERS and not any(
+                item["id"] == provider for item in providers
+            ):
+                raise ValueError("provider is not joined")
             writes = update.copy()
             for name in newly_joined:
+                if name not in WEB_PROVIDERS:
+                    continue
                 if not any(item["id"] == name for item in providers):
                     item = _built_in(name)
                     _provider_name(item["name"], providers)
