@@ -9,6 +9,7 @@ def test_chinese_catalog_results_do_not_wait_for_yahoo(tmp_path):
         ("SH", "600000", "浦发银行"),
         ("SZ", "000001", "平安银行"),
         ("HK", "00780", "同程旅行"),
+        ("US", "TCOM", "携程"),
     ])
 
     calls = []
@@ -19,6 +20,29 @@ def test_chinese_catalog_results_do_not_wait_for_yahoo(tmp_path):
 
     assert search_symbols("同程", lookup=offline, catalog_path=path) == {
         "results": [{"symbol": "0780.HK", "name": "同程旅行", "exchange": "HKEX", "type": "EQUITY"}],
+        "unavailable": False,
+    }
+    assert calls == []
+
+
+def test_chinese_us_name_resolves_to_market_symbol_without_yahoo(tmp_path):
+    from web.catalog import refresh_catalog
+
+    path = tmp_path / "assets.json"
+    refresh_catalog(path, fetch=lambda: [
+        ("SH", "600000", "浦发银行"),
+        ("SZ", "000001", "平安银行"),
+        ("HK", "00780", "同程旅行"),
+        ("US", "TCOM", "携程"),
+    ])
+    calls = []
+
+    assert search_symbols(
+        "携程",
+        lookup=lambda query: calls.append(query),
+        catalog_path=path,
+    ) == {
+        "results": [{"symbol": "TCOM", "name": "携程", "exchange": "US", "type": "EQUITY"}],
         "unavailable": False,
     }
     assert calls == []
