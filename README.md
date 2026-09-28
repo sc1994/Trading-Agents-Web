@@ -32,11 +32,12 @@ as the web service. It publishes `assets.json` in that directory atomically; fai
 or incomplete updates retain the previous snapshot. Without a snapshot, Yahoo
 symbol/English-name search still works. The updater uses AKShare's Shanghai and
 Shenzhen A-share lists and its Eastmoney Hong Kong quote list, falling back to
-the Sina Hong Kong list if Eastmoney is unavailable. It includes ordinary
-HK codes, not special counters, and deliberately excludes Beijing listings until
-their Yahoo ticker support is verified. AKShare's MIT software license does not
-grant rights to redistribute the upstream market data; review source terms before
-commercial deployment.
+the Sina Hong Kong list if Eastmoney is unavailable. It also uses Sina's US stock
+name list so Chinese names such as `携程` resolve to their US symbols. It includes
+ordinary HK codes, not special counters, and deliberately excludes Beijing listings
+until their Yahoo ticker support is verified. AKShare's MIT software license does
+not grant rights to redistribute the upstream market data; review source terms
+before commercial deployment.
 
 ---
 
