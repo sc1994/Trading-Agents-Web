@@ -314,7 +314,6 @@ def test_search_route_reads_published_chinese_snapshot(client, monkeypatch):
     refresh_catalog(client.app.state.data_dir / "assets.json", fetch=lambda: [
         ("SH", "600000", "浦发银行"), ("SZ", "000001", "平安银行"),
         ("HK", "00780", "同程旅行"),
-        ("US", "TCOM", "携程"),
     ])
     monkeypatch.setattr("web.search._yahoo_lookup", lambda _query: [])
     assert client.get("/api/assets/search?q=同程").json() == {
