@@ -25,19 +25,19 @@ or replicas against it. See the [deployment and recovery runbook](docs/operation
 for release gates, volume ownership, backup/restore and upgrades. This documentation does
 not authorize a production deployment.
 
-Chinese equity-name search uses a local snapshot, not a live third-party call during
-search. After installation, run `python -m web.catalog` once and schedule it daily
+Chinese equity-name search checks a local snapshot first and uses a bounded live
+suggestion request when the snapshot has no match. After installation, run
+`python -m web.catalog` once and schedule it daily
 with the deployment's scheduler under the same user and `TRADINGAGENTS_WEB_DATA_DIR`
 as the web service. It publishes `assets.json` in that directory atomically; failed
-or incomplete updates retain the previous snapshot. Without a snapshot, Yahoo
-symbol/English-name search still works. The updater uses AKShare's Shanghai and
-Shenzhen A-share lists and its Eastmoney Hong Kong quote list, falling back to
-the Sina Hong Kong list if Eastmoney is unavailable. It also uses Sina's US stock
-name list so Chinese names such as `携程` resolve to their US symbols. It includes
-ordinary HK codes, not special counters, and deliberately excludes Beijing listings
-until their Yahoo ticker support is verified. AKShare's MIT software license does
-not grant rights to redistribute the upstream market data; review source terms
-before commercial deployment.
+or incomplete updates retain the previous snapshot. Without a snapshot, Chinese-name
+queries use Eastmoney's bounded suggestion endpoint while Yahoo handles symbol and
+English-name search. The updater uses AKShare's Shanghai and Shenzhen A-share lists
+and its Eastmoney Hong Kong quote list, falling back to the Sina Hong Kong list if
+Eastmoney is unavailable. It includes ordinary HK codes, not special counters, and
+deliberately excludes Beijing listings until their Yahoo ticker support is verified.
+AKShare's MIT software license does not grant rights to redistribute the upstream
+market data; review source terms before commercial deployment.
 
 ---
 

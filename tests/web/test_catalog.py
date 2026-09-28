@@ -13,7 +13,6 @@ def rows():
         ("SZ", "000001", "平安银行"),
         ("HK", "00780", "同程旅行"),
         ("HK", "89988", "阿里巴巴-WR"),
-        ("US", "TCOM", "携程"),
     ]
 
 
@@ -24,11 +23,8 @@ def test_refresh_publishes_only_supported_markets_and_searches_chinese(tmp_path)
         {"symbol": "0780.HK", "name": "同程旅行", "exchange": "HKEX", "type": "EQUITY"}
     ]
     assert search_catalog(path, "银行")[0]["symbol"] == "000001.SZ"
-    assert search_catalog(path, "携程") == [
-        {"symbol": "TCOM", "name": "携程", "exchange": "US", "type": "EQUITY"}
-    ]
     assert search_catalog(path, "阿里") == []
-    assert len(json.loads(path.read_text())["assets"]) == 4
+    assert len(json.loads(path.read_text())["assets"]) == 3
 
 
 def test_failed_or_empty_refresh_keeps_last_valid_snapshot(tmp_path):
@@ -79,10 +75,6 @@ def test_fetch_uses_sina_hk_list_when_eastmoney_disconnects(monkeypatch):
         ),
         stock_hk_spot_em=eastmoney,
         stock_hk_spot=lambda: Frame([{"代码": "00780", "中文名称": "同程旅行"}]),
-        get_us_stock_name=lambda: Frame([
-            {"name": "Trip.com Group Limited", "cname": "携程", "symbol": "TCOM"}
-        ]),
     )
     monkeypatch.setitem(sys.modules, "akshare", fake)
     assert ("HK", "00780", "同程旅行") in list(fetch_akshare())
-    assert ("US", "TCOM", "携程") in list(fetch_akshare())

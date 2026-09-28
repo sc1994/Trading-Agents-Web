@@ -41,8 +41,6 @@ def fetch_akshare():
         logger.warning("Eastmoney HK list unavailable; trying Sina")
         for _, row in ak.stock_hk_spot().iterrows():
             yield "HK", str(row["代码"]), str(row["中文名称"])
-    for _, row in ak.get_us_stock_name().iterrows():
-        yield "US", str(row["symbol"]), str(row["cname"])
 
 
 def refresh_catalog(path: Path, fetch=None) -> int:
@@ -50,7 +48,7 @@ def refresh_catalog(path: Path, fetch=None) -> int:
     path = Path(path)
     production = fetch is None
     entries = {}
-    counts = {"SH": 0, "SZ": 0, "HK": 0, "US": 0}
+    counts = {"SH": 0, "SZ": 0, "HK": 0}
     for market, code, name in (fetch or fetch_akshare)():
         code, name = str(code).strip(), str(name).strip()
         if not name:
@@ -59,8 +57,6 @@ def refresh_catalog(path: Path, fetch=None) -> int:
             symbol, exchange = f"{code}.{'SS' if market == 'SH' else 'SZ'}", market
         elif market == "HK" and re.fullmatch(r"0\d{4}", code):
             symbol, exchange = f"{code[1:]}.HK", "HKEX"
-        elif market == "US" and re.fullmatch(r"[A-Za-z0-9._^=-]{1,32}", code):
-            symbol, exchange = code.upper(), "US"
         else:
             continue
         if symbol not in entries:

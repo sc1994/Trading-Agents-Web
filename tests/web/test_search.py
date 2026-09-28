@@ -1,3 +1,6 @@
+import io
+import json
+
 from web.search import search_symbols
 
 
@@ -9,7 +12,6 @@ def test_chinese_catalog_results_do_not_wait_for_yahoo(tmp_path):
         ("SH", "600000", "浦发银行"),
         ("SZ", "000001", "平安银行"),
         ("HK", "00780", "同程旅行"),
-        ("US", "TCOM", "携程"),
     ])
 
     calls = []
@@ -26,26 +28,81 @@ def test_chinese_catalog_results_do_not_wait_for_yahoo(tmp_path):
 
 
 def test_chinese_us_name_resolves_to_market_symbol_without_yahoo(tmp_path):
-    from web.catalog import refresh_catalog
+    payload = {"QuotationCodeTable": {"Data": [
+        {
+            "Code": "TCOM", "Name": "携程", "JYS": "NASDAQ",
+            "Classify": "UsStock", "TypeUS": "3",
+        },
+        {
+            "Code": "09961", "Name": "携程集团-S", "JYS": "HK",
+            "Classify": "HK", "TypeUS": "3",
+        },
+        {
+            "Code": "13241", "Name": "携程瑞银六乙购B", "JYS": "HK",
+            "Classify": "HK", "TypeUS": "6",
+        },
+        {
+            "Code": "600519", "Name": "贵州茅台", "JYS": "2",
+            "Classify": "AStock", "TypeUS": "2", "MktNum": "1",
+        },
+        {
+            "Code": "000001", "Name": "平安银行", "JYS": "6",
+            "Classify": "AStock", "TypeUS": "6", "MktNum": "0",
+        },
+        {
+            "Code": "300750", "Name": "宁德时代", "JYS": "80",
+            "Classify": "AStock", "TypeUS": "80", "MktNum": "0",
+        },
+        {
+            "Code": "AAPL", "Name": "苹果", "JYS": "NASDAQ",
+            "Classify": "UsStock", "TypeUS": "1",
+        },
+        {
+            "Code": "BRK_B", "Name": "伯克希尔哈撒韦-B", "JYS": "NYSE",
+            "Classify": "UsStock", "TypeUS": "1",
+        },
+        {
+            "Code": "QQQ", "Name": "纳斯达克100ETF-Invesco", "JYS": "NASDAQ",
+            "Classify": "UsStock", "TypeUS": "5",
+        },
+        {
+            "Code": "GRABW", "Name": "Grab Holdings Ltd Wt", "JYS": "NASDAQ",
+            "Classify": "UsStock", "TypeUS": "8",
+        },
+        {
+            "Code": "03032", "Name": "恒生科技ETF", "JYS": "HK",
+            "Classify": "HK", "TypeUS": "1",
+        },
+        {
+            "Code": "513180", "Name": "恒生科技ETF华夏", "JYS": "9",
+            "Classify": "Fund", "TypeUS": "9", "MktNum": "1",
+        },
+        {
+            "Code": "000847", "Name": "腾讯济安", "JYS": "1",
+            "Classify": "Index", "TypeUS": "1", "MktNum": "1",
+        },
+    ]}}
+    requests = []
 
-    path = tmp_path / "assets.json"
-    refresh_catalog(path, fetch=lambda: [
-        ("SH", "600000", "浦发银行"),
-        ("SZ", "000001", "平安银行"),
-        ("HK", "00780", "同程旅行"),
-        ("US", "TCOM", "携程"),
-    ])
-    calls = []
+    def open_search(url, timeout):
+        requests.append((url, timeout))
+        return io.BytesIO(json.dumps(payload).encode())
 
-    assert search_symbols(
-        "携程",
-        lookup=lambda query: calls.append(query),
-        catalog_path=path,
-    ) == {
-        "results": [{"symbol": "TCOM", "name": "携程", "exchange": "US", "type": "EQUITY"}],
+    assert search_symbols("携程", catalog_path=tmp_path / "missing.json", request=open_search) == {
+        "results": [
+            {"symbol": "TCOM", "name": "携程", "exchange": "NASDAQ", "type": "EQUITY"},
+            {"symbol": "9961.HK", "name": "携程集团-S", "exchange": "HKEX", "type": "EQUITY"},
+            {"symbol": "600519.SS", "name": "贵州茅台", "exchange": "SH", "type": "EQUITY"},
+            {"symbol": "000001.SZ", "name": "平安银行", "exchange": "SZ", "type": "EQUITY"},
+            {"symbol": "300750.SZ", "name": "宁德时代", "exchange": "SZ", "type": "EQUITY"},
+            {"symbol": "AAPL", "name": "苹果", "exchange": "NASDAQ", "type": "EQUITY"},
+            {"symbol": "BRK-B", "name": "伯克希尔哈撒韦-B", "exchange": "NYSE", "type": "EQUITY"},
+        ],
         "unavailable": False,
     }
-    assert calls == []
+    assert len(requests) == 1
+    assert "input=%E6%90%BA%E7%A8%8B" in requests[0][0]
+    assert requests[0][1] == 5
 
 
 def test_production_search_bounds_yahoo_request(monkeypatch):
