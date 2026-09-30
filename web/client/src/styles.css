@@ -979,10 +979,221 @@ h1 {
 .report-section h3 {
   font-size: 17px;
 }
-.report-section + .report-section {
+.complete-report {
   margin-top: 28px;
-  padding-top: 16px;
+  min-width: 0;
+}
+.complete-report > h2 {
+  font-size: 18px;
+  margin: 0 0 8px;
+}
+.report-reader {
+  min-width: 0;
+  --reader-surface: #f3f6f5;
+  --reader-team-height: 48px;
+}
+.ant-card .report-reader {
+  --reader-surface: #fff;
+}
+.reader-inner {
+  container-type: inline-size;
+  container-name: reader;
+}
+.report-reader .report-tabs > .ant-tabs-nav {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  height: var(--reader-team-height);
+  margin: 0;
+  background: var(--reader-surface);
+}
+.report-reader .report-tabs > .ant-tabs-nav .ant-tabs-tab {
+  padding: 12px 0;
+}
+.reader-controls {
+  position: sticky;
+  top: var(--reader-team-height);
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 58px;
+  padding: 10px 0;
+  border-bottom: 1px solid #dce5e2;
+  background: var(--reader-surface);
+}
+.reader-role-segments {
+  max-width: 100%;
+  min-width: 0;
+  background: #e9efec;
+}
+.reader-role-segments.ant-segmented {
+  padding: 2px;
+  border: 0;
+}
+.reader-role-segments .ant-segmented-item-label {
+  min-height: 32px !important;
+  line-height: 32px;
+}
+.reader-role-select {
+  display: none;
+}
+.reader-round-select,
+.reader-role-select {
+  color: #344f43;
+  background: var(--reader-surface);
+  border: 1px solid transparent;
+  border-radius: 4px;
+  font-size: 13px;
+  min-height: 36px;
+  padding: 4px;
+}
+.reader-role-select {
+  background: #e9efec;
+  max-width: 160px;
+}
+.reader-tools {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 6px;
+}
+.reader-tools .ant-btn {
+  height: 36px;
+  width: 36px;
+}
+.reader-single-role {
+  font-size: 13px;
+  color: #344f43;
+}
+.reader-article {
+  max-width: 960px;
+  min-width: 0;
+  margin: 0 auto;
+  padding: 28px 0;
+}
+.reader-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  color: #647780;
+  font-size: 12px;
+  margin-bottom: 18px;
+}
+.reader-article .markdown {
+  font-size: 16px;
+  line-height: 1.95;
+  letter-spacing: 0;
+}
+.reader-article .markdown :is(h1, h2, h3, h4, h5, h6) {
+  scroll-margin-top: 130px;
+  letter-spacing: 0;
+}
+.reader-article .markdown :is(h4, h5, h6) {
+  font-size: 16px;
+}
+.reader-chapters {
+  display: grid;
+  gap: 3px;
+  max-height: min(440px, 60dvh);
+  overflow-y: auto;
+  width: min(280px, calc(100vw - 64px));
+}
+.reader-chapters a {
+  display: block;
+  padding: 8px 10px;
+  border-radius: 4px;
+  color: #344f43;
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.reader-chapters a:hover,
+.reader-chapters a:focus-visible {
+  background: #e4f2eb;
+  color: #1f7a55;
+}
+.reader-chapters .reader-chapter-nested {
+  padding-left: 22px;
+}
+.reader-pagination {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   border-top: 1px solid #dce5e2;
+  margin-top: 28px;
+  padding-top: 14px;
+  font-size: 13px;
+  color: #647780;
+}
+.reader-focused {
+  position: fixed;
+  inset: 0;
+  z-index: 101;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: #f3f6f5;
+  --reader-surface: #f3f6f5;
+}
+.reader-focused .reader-inner {
+  max-width: 1120px;
+  min-height: 100dvh;
+  margin: auto;
+  padding: 0 32px;
+}
+.reader-role-select:focus-visible,
+.reader-round-select:focus-visible {
+  outline: 2px solid #1f7a55;
+  outline-offset: 2px;
+}
+@media (max-width: 1100px) {
+  .reader-role-segments {
+    display: none;
+  }
+  .reader-role-select {
+    display: block;
+    min-width: 0;
+  }
+}
+@container reader (max-width: 700px) {
+  .reader-role-segments {
+    display: none;
+  }
+  .reader-role-select {
+    display: block;
+    min-width: 0;
+  }
+}
+@media (max-width: 767px) {
+  .report-reader .report-tabs > .ant-tabs-nav .ant-tabs-tab + .ant-tabs-tab {
+    margin-left: 22px;
+  }
+  .reader-controls {
+    gap: 8px;
+    min-height: 54px;
+    padding: 8px 0;
+  }
+  .reader-role-select {
+    max-width: 140px;
+  }
+  .reader-tools {
+    gap: 2px;
+  }
+  .reader-round-select,
+  .reader-role-select {
+    font-size: 12px;
+  }
+  .reader-tools .ant-btn {
+    width: 32px;
+    height: 36px;
+  }
+  .reader-article {
+    padding: 24px 0;
+  }
+  .reader-focused .reader-inner {
+    padding: 0 20px;
+  }
 }
 .summary-grid {
   display: grid;

@@ -8,22 +8,28 @@
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
     "test": "vitest",
-    "acceptance": "npm run build && node scripts/acceptance.mjs"
+    "acceptance": "npm run build && node scripts/acceptance.mjs",
+    "acceptance:reader": "npm run build && node scripts/report-reader-acceptance.mjs"
   },
   "dependencies": {
     "@ant-design/icons": "^6.0.0",
     "antd": "^5.27.0",
+    "mdast-util-to-string": "^4.0.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-markdown": "^10.1.0",
     "react-router-dom": "^7.9.0",
-    "remark-gfm": "^4.0.1"
+    "remark-gfm": "^4.0.1",
+    "remark-parse": "^11.0.0",
+    "unified": "^11.0.5",
+    "unist-util-visit": "^5.1.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",
     "@testing-library/jest-dom": "^6.9.0",
     "@testing-library/react": "^16.3.0",
     "@testing-library/user-event": "^14.6.1",
+    "@types/mdast": "^4.0.4",
     "@types/node": "^22.18.0",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",

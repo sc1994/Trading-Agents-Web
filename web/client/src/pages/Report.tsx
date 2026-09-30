@@ -165,9 +165,10 @@ export function Report({
               )}
             </Card>
           </div>
-          <Card title="完整报告">
+          <section className="complete-report" aria-label="完整报告">
+            <h2>完整报告</h2>
             <Sections sections={data.report.sections} />
-          </Card>
+          </section>
         </>
       )}
     </>

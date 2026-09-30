@@ -1,6 +1,8 @@
 # Report Reading V1: Design Preview
 
-Status: proposed visual design, awaiting user approval. No application or API changes.
+Status: visual design approved in chat and implemented on the feature branch.
+The screenshots in Preview Assets remain the original proposal; see Implemented
+Reader below for production-component screenshots. No API changes.
 
 ## Design Read
 
@@ -79,7 +81,36 @@ The isolated visual prototype is not a working production report interface.
 - Also inspected a dark-mode prototype; this does not add dark mode to the app.
 - No backend/model calls, production changes, or application test claims.
 
-## Approval Question
+## Approval
 
-Approve two navigation rows plus an on-demand chapter menu, with continuous
-reading within the selected turn, before implementation begins.
+The user approved two navigation rows plus an on-demand chapter menu, with
+continuous reading within the selected turn, before implementation began.
+
+## Implemented Reader
+
+The implementation retains decision summaries, risk evidence and full Markdown
+export. The reader is also shared with live task output. Mobile and narrow panels
+use a role selector to keep the toolbar on one line. Focus mode preserves the
+visible Markdown block when entering or exiting, isolates the background, and
+supports Escape. Team overflow menus and chapter menus stay inside the reader.
+
+Native role markers are extracted outside literal Markdown code/HTML blocks,
+including single-newline boundaries following lists, quotes and tables. Legacy
+text without a leading marker stays intact. An unindented role prefix inside
+generated prose is indistinguishable from a native boundary in the existing
+string format; typed turn records would be needed to remove that ambiguity.
+
+![Implemented desktop](assets/IMPLEMENTED-report-reader-desktop.png)
+![Implemented chapter menu](assets/IMPLEMENTED-report-reader-chapters.png)
+![Implemented mobile](assets/IMPLEMENTED-report-reader-mobile.png)
+![Implemented focus mode](assets/IMPLEMENTED-report-reader-focus.png)
+
+Browser acceptance covers 1440px, 1024px, 390px and 320px widths. It intercepts all
+API calls and uses illustrative report content, not live investment evidence.
+
+```bash
+cd web/client
+npm run acceptance:reader
+# Optionally use an existing system Chrome:
+CHROMIUM_EXECUTABLE_PATH=/usr/bin/google-chrome npm run acceptance:reader
+```
