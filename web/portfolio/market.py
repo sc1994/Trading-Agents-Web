@@ -27,8 +27,13 @@ class BoundedFetch:
             if self._stopped:
                 raise DomainError("market_stopped")
             command = self.command or [sys.executable, "-m", "web.portfolio.fetch", operation]
-            child = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                     stderr=subprocess.DEVNULL, text=True)
+            child = subprocess.Popen(
+                command,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+            )
             self._children.add(child)
         try:
             output, _ = child.communicate(json.dumps(payload), timeout=timeout)
@@ -38,9 +43,11 @@ class BoundedFetch:
             if not isinstance(value, dict):
                 raise DomainError("market_unavailable")
             if value.get("error_code"):
-                raise DomainError(value["error_code"] if value["error_code"] in {
-                    "market_dependency_missing", "missing_quote"
-                } else "market_unavailable")
+                raise DomainError(
+                    value["error_code"]
+                    if value["error_code"] in {"market_dependency_missing", "missing_quote"}
+                    else "market_unavailable"
+                )
             return value
         except subprocess.TimeoutExpired:
             self._reap(child)
@@ -52,6 +59,9 @@ class BoundedFetch:
         finally:
             if child.poll() is None:
                 self._reap(child)
+            for pipe in (child.stdin, child.stdout):
+                if pipe and not pipe.closed:
+                    pipe.close()
             with self._lock:
                 self._children.discard(child)
 
@@ -60,10 +70,10 @@ class BoundedFetch:
         if child.poll() is None:
             child.terminate()
         try:
-            child.communicate(timeout=0.5)
+            child.wait(timeout=0.5)
         except subprocess.TimeoutExpired:
             child.kill()
-            child.communicate(timeout=0.5)
+            child.wait(timeout=0.5)
 
     def stop(self):
         with self._lock:
@@ -93,8 +103,9 @@ class AShareMarket:
     def _publish(self, name: str, value: dict):
         temporary = None
         try:
-            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=self.directory,
-                                             prefix=f".{name}-", delete=False) as output:
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=self.directory, prefix=f".{name}-", delete=False
+            ) as output:
                 temporary = Path(output.name)
                 json.dump(value, output, ensure_ascii=False, allow_nan=False)
                 output.flush()
@@ -111,15 +122,23 @@ class AShareMarket:
             for item in raw["instruments"]:
                 symbol, exchange = item["symbol"], item["exchange"]
                 suffix = {"SH": "SS", "SZ": "SZ", "BJ": "BJ"}.get(exchange)
-                if (not suffix or not re.fullmatch(r"\d{6}\." + suffix, symbol)
-                        or item.get("currency") != "CNY" or item.get("security_type") != "A_SHARE"
-                        or not isinstance(item.get("name"), str) or not item["name"].strip()):
+                if (
+                    not suffix
+                    or not re.fullmatch(r"\d{6}\." + suffix, symbol)
+                    or item.get("currency") != "CNY"
+                    or item.get("security_type") != "A_SHARE"
+                    or not isinstance(item.get("name"), str)
+                    or not item["name"].strip()
+                ):
                     raise ValueError("invalid identity")
                 items[symbol] = {**item, "verified_at": now}
             if {item["exchange"] for item in items.values()} != {"SH", "SZ", "BJ"}:
                 raise ValueError("partial catalog")
-            value = {"instruments": list(items.values()), "fetched_at": now,
-                     "source": raw.get("source", "akshare_exchange_catalog")}
+            value = {
+                "instruments": list(items.values()),
+                "fetched_at": now,
+                "source": raw.get("source", "akshare_exchange_catalog"),
+            }
             self._publish("catalog", value)
             return value
         except Exception:
@@ -136,8 +155,11 @@ class AShareMarket:
         if not re.fullmatch(r"\d{6}(?:\.(?:SS|SZ|BJ))?", symbol):
             raise DomainError("unsupported_market", "symbol")
         items = self._catalog()["instruments"]
-        matches = [item for item in items if item["symbol"] == symbol or (
-            len(symbol) == 6 and item["symbol"][:6] == symbol)]
+        matches = [
+            item
+            for item in items
+            if item["symbol"] == symbol or (len(symbol) == 6 and item["symbol"][:6] == symbol)
+        ]
         if len(matches) != 1:
             raise DomainError("instrument_unverified", "symbol")
         return matches[0].copy()
@@ -151,8 +173,11 @@ class AShareMarket:
         except DomainError:
             catalog, available = [], False
         needle = query.strip().casefold()
-        local = [item for item in catalog if needle in item["symbol"].casefold()
-                 or needle in item["name"].casefold()]
+        local = [
+            item
+            for item in catalog
+            if needle in item["symbol"].casefold() or needle in item["name"].casefold()
+        ]
         if local:
             rows = [{**item, "supported": True, "support_code": None} for item in local[:8]]
             return {"results": rows, "unavailable": False}
@@ -162,10 +187,18 @@ class AShareMarket:
         for item in lookup["results"]:
             symbol = item["symbol"].upper()
             supported = symbol in verified
-            code = None if supported else "unsupported_market" if not re.fullmatch(
-                r"\d{6}\.(?:SS|SZ|BJ)", symbol
-            ) else "instrument_unverified" if available else "catalog_unavailable"
-            rows.append({**item, **verified.get(symbol, {}), "supported": supported, "support_code": code})
+            code = (
+                None
+                if supported
+                else "unsupported_market"
+                if not re.fullmatch(r"\d{6}\.(?:SS|SZ|BJ)", symbol)
+                else "instrument_unverified"
+                if available
+                else "catalog_unavailable"
+            )
+            rows.append(
+                {**item, **verified.get(symbol, {}), "supported": supported, "support_code": code}
+            )
         return {"results": rows, "unavailable": lookup["unavailable"] or not available}
 
     def calendar(self) -> dict:
@@ -178,18 +211,31 @@ class AShareMarket:
                 dates = sorted({iso_date(value, "calendar") for value in raw["dates"]})
                 if len(dates) < 2:
                     raise ValueError("incomplete calendar")
-                value = {"dates": dates, "covered_from": dates[0], "covered_until": dates[-1],
-                         "source": raw.get("source", "akshare_sina"), "fetched_at": _now()}
+                value = {
+                    "dates": dates,
+                    "covered_from": dates[0],
+                    "covered_until": dates[-1],
+                    "source": raw.get("source", "akshare_sina"),
+                    "fetched_at": _now(),
+                }
                 self._publish("calendar", value)
                 return value
             except Exception:
                 raise DomainError("calendar_unavailable") from None
 
     def quote(self, instrument: dict, target_date: str) -> dict:
-        base = {"symbol": instrument["symbol"], "price_date": None, "close": None,
-                "currency": "CNY", "source": "akshare_eastmoney_unadjusted", "fetched_at": _now()}
+        base = {
+            "symbol": instrument["symbol"],
+            "price_date": None,
+            "close": None,
+            "currency": "CNY",
+            "source": "akshare_eastmoney_unadjusted",
+            "fetched_at": _now(),
+        }
         try:
-            raw = self.call("quote", {"symbol": instrument["symbol"], "target_date": target_date}, 20)
+            raw = self.call(
+                "quote", {"symbol": instrument["symbol"], "target_date": target_date}, 20
+            )
             if raw.get("error_code"):
                 raise DomainError("missing_quote")
             if raw.get("symbol") != instrument["symbol"] or raw.get("currency") != "CNY":
@@ -198,12 +244,15 @@ class AShareMarket:
             iso_date(raw.get("price_date"), "price_date")
             if raw["price_date"] != target_date:
                 return {**base, **raw, "error_code": "stale_quote"}
-            if "volume" in raw and (not str(raw["volume"]).replace(".", "", 1).isdigit()
-                                    or float(raw["volume"]) <= 0):
+            if "volume" in raw and (
+                not str(raw["volume"]).replace(".", "", 1).isdigit() or float(raw["volume"]) <= 0
+            ):
                 raise DomainError("missing_quote")
             return {**base, **raw, "error_code": None}
         except DomainError as error:
-            code = "invalid_quote" if error.code in {"invalid_decimal", "invalid_date"} else error.code
+            code = (
+                "invalid_quote" if error.code in {"invalid_decimal", "invalid_date"} else error.code
+            )
             return {**base, "error_code": code}
         except Exception:
             return {**base, "error_code": "market_unavailable"}

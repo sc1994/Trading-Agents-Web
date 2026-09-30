@@ -57,8 +57,12 @@ class CloseCheckWorker:
         latest = self.store.latest_check()
         if latest and latest["status"] in {"queued", "running"}:
             return
-        if (local.weekday() >= 5 or local.time() < CUTOFF
-                or not self.store.get_settings()["automatic"] or not self.store.list_plans()):
+        if (
+            local.weekday() >= 5
+            or local.time() < CUTOFF
+            or not self.store.get_settings()["automatic"]
+            or not self.store.list_plans()
+        ):
             return
         day = local.date().isoformat()
         if self.store.has_success(day):
@@ -66,7 +70,9 @@ class CloseCheckWorker:
         attempts = self.store.automatic_attempts(day)
         if len(attempts) >= 3:
             return
-        if attempts and now - datetime.fromisoformat(attempts[-1]["created_at"]) < timedelta(minutes=30):
+        if attempts and now - datetime.fromisoformat(attempts[-1]["created_at"]) < timedelta(
+            minutes=30
+        ):
             return
         try:
             calendar = self.market.calendar()

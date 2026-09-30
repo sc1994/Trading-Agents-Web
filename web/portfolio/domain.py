@@ -18,9 +18,11 @@ def decimal_text(value: Decimal) -> str:
 
 
 def positive_decimal(value, field: str) -> str:
-    if not isinstance(value, str) or not re.fullmatch(
-        r"(?:0|[1-9][0-9]{0,11})(?:\.[0-9]{1,6})?", value
-    ) or Decimal(value) <= 0:
+    if (
+        not isinstance(value, str)
+        or not re.fullmatch(r"(?:0|[1-9][0-9]{0,11})(?:\.[0-9]{1,6})?", value)
+        or Decimal(value) <= 0
+    ):
         raise DomainError("invalid_decimal", field)
     return decimal_text(Decimal(value))
 
@@ -42,11 +44,14 @@ def reason_text(value) -> str:
 
 
 def validate_plan(raw: dict) -> dict:
-    defaults = {"reason": "", "lower": None, "upper": None, "review_date": None,
-                "cost_pending": False}
-    if not isinstance(raw, dict) or set(raw) - {
-        "symbol", "horizon", "shares", "cost", *defaults
-    }:
+    defaults = {
+        "reason": "",
+        "lower": None,
+        "upper": None,
+        "review_date": None,
+        "cost_pending": False,
+    }
+    if not isinstance(raw, dict) or set(raw) - {"symbol", "horizon", "shares", "cost", *defaults}:
         raise DomainError("invalid_fields")
     value = {**defaults, **raw}
     if not isinstance(value.get("symbol"), str) or not re.fullmatch(
@@ -102,23 +107,42 @@ def evaluate(plan: dict, quote: dict | None, target_date: str) -> dict:
             pnl = decimal_text((close - Decimal(plan["cost"])) * plan["shares"])
     if plan.get("review_date") and target_date >= plan["review_date"]:
         signals.append("review_date")
-    state = "review" if signals else "unavailable" if quality != "valid" else (
-        "not_triggered" if any(plan.get(field) for field in ("lower", "upper", "review_date"))
-        else "no_conditions"
+    state = (
+        "review"
+        if signals
+        else "unavailable"
+        if quality != "valid"
+        else (
+            "not_triggered"
+            if any(plan.get(field) for field in ("lower", "upper", "review_date"))
+            else "no_conditions"
+        )
     )
-    return {"plan_id": plan["id"], "revision": plan["revision"],
-            "plan_snapshot": deepcopy(plan), "target_date": target_date,
-            "quote": deepcopy(quote), "quality": quality, "error_code": error,
-            "signals": signals, "state": state, "market_value": value, "unrealized_pnl": pnl}
+    return {
+        "plan_id": plan["id"],
+        "revision": plan["revision"],
+        "plan_snapshot": deepcopy(plan),
+        "target_date": target_date,
+        "quote": deepcopy(quote),
+        "quality": quality,
+        "error_code": error,
+        "signals": signals,
+        "state": state,
+        "market_value": value,
+        "unrealized_pnl": pnl,
+    }
 
 
 def summarize(plans: list[dict], results: list[dict], concentration_limit: str | None) -> dict:
-    incomplete = {"complete": False, "market_value": None, "unrealized_pnl": None,
-                  "concentrations": []}
+    incomplete = {
+        "complete": False,
+        "market_value": None,
+        "unrealized_pnl": None,
+        "concentrations": [],
+    }
     active = [p for p in plans if p["status"] == "active"]
     if not active:
-        return {"complete": True, "market_value": "0", "unrealized_pnl": "0",
-                "concentrations": []}
+        return {"complete": True, "market_value": "0", "unrealized_pnl": "0", "concentrations": []}
     matched = {r["plan_id"]: r for r in results}
     selected = []
     for p in active:
@@ -139,9 +163,17 @@ def summarize(plans: list[dict], results: list[dict], concentration_limit: str |
         concentrations = []
         for symbol, value in sorted(stocks.items(), key=lambda item: (-item[1], item[0])):
             percent = value / total * 100
-            concentrations.append({"symbol": symbol,
-                                   "percent": decimal_text(percent.quantize(Decimal("0.01"))),
-                                   "triggered": concentration_limit is not None
-                                   and percent >= Decimal(concentration_limit)})
-    return {"complete": True, "market_value": decimal_text(total),
-            "unrealized_pnl": decimal_text(pnl), "concentrations": concentrations}
+            concentrations.append(
+                {
+                    "symbol": symbol,
+                    "percent": decimal_text(percent.quantize(Decimal("0.01"))),
+                    "triggered": concentration_limit is not None
+                    and percent >= Decimal(concentration_limit),
+                }
+            )
+    return {
+        "complete": True,
+        "market_value": decimal_text(total),
+        "unrealized_pnl": decimal_text(pnl),
+        "concentrations": concentrations,
+    }

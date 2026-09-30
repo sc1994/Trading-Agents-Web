@@ -25,8 +25,12 @@ STATIC_DIR = Path(__file__).parent / "client" / "dist"
 _FALLBACK_INDEX = Path(__file__).with_name("index.html")
 
 
-def create_app(data_dir: Path | None = None, executor: GraphRunner | None = None,
-               portfolio_market=None, portfolio_clock=None) -> FastAPI:
+def create_app(
+    data_dir: Path | None = None,
+    executor: GraphRunner | None = None,
+    portfolio_market=None,
+    portfolio_clock=None,
+) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app):
         directory = Path(
@@ -104,7 +108,15 @@ def create_app(data_dir: Path | None = None, executor: GraphRunner | None = None
             if re.search(r"-[A-Za-z0-9_-]{8,}\.[^.]+$", candidate.name):
                 headers["Cache-Control"] = "public, max-age=31536000, immutable"
             return FileResponse(candidate, headers=headers)
-        if path not in {"", "index.html", "history", "settings", "tasks", "holdings", "watchlist"} and not (
+        if path not in {
+            "",
+            "index.html",
+            "history",
+            "settings",
+            "tasks",
+            "holdings",
+            "watchlist",
+        } and not (
             path.startswith(("tasks/", "reports/"))
             and all(part not in {"", ".", ".."} for part in path.split("/"))
         ):

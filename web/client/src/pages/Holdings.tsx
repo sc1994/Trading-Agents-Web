@@ -412,6 +412,7 @@ export function Holdings({
                               {r.quote?.fetched_at
                                 .replace("T", " ")
                                 .slice(0, 19)}
+                              {" UTC"}
                             </small>
                           )}
                           {r.state === "not_triggered" && (

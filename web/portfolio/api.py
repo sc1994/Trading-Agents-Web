@@ -60,11 +60,22 @@ def invoke(function, *args, **kwargs):
     try:
         return function(*args, **kwargs)
     except DomainError as error:
-        status = 404 if error.code == "not_found" else 409 if error.code in {
-            "revision_conflict", "plan_closed", "watch_exists", "check_not_running"
-        } else 503 if error.code in {
-            "catalog_unavailable", "calendar_unavailable", "market_unavailable", "worker_stopped"
-        } else 422
+        status = (
+            404
+            if error.code == "not_found"
+            else 409
+            if error.code
+            in {"revision_conflict", "plan_closed", "watch_exists", "check_not_running"}
+            else 503
+            if error.code
+            in {
+                "catalog_unavailable",
+                "calendar_unavailable",
+                "market_unavailable",
+                "worker_stopped",
+            }
+            else 422
+        )
         raise HTTPException(status, {"code": error.code, "field": error.field}) from None
 
 
@@ -136,7 +147,7 @@ def update_settings(body: SettingsInput, request: Request):
 
 
 @router.post("/checks", status_code=202)
-def create_check(request: Request):
+def create_check(request: Request, body: Input | None = None):
     return invoke(request.app.state.portfolio_worker.request_check)
 
 
@@ -158,19 +169,41 @@ def overview(request: Request):
     portfolio = request.app.state.portfolio
     current = portfolio.list_plans()
     latest = portfolio.latest_check()
-    results = latest["results"] if latest and latest["status"] in {"completed", "partial", "failed"} else []
+    results = (
+        latest["results"]
+        if latest and latest["status"] in {"completed", "partial", "failed"}
+        else []
+    )
     indexed = {r["plan_id"]: r for r in results}
-    plans = [{**p, "result": indexed.get(p["id"]), "result_obsolete": bool(
-        indexed.get(p["id"]) and indexed[p["id"]]["revision"] != p["revision"])} for p in current]
+    plans = [
+        {
+            **p,
+            "result": indexed.get(p["id"]),
+            "result_obsolete": bool(
+                indexed.get(p["id"]) and indexed[p["id"]]["revision"] != p["revision"]
+            ),
+        }
+        for p in current
+    ]
     symbols = {p["symbol"] for p in current} | {w["symbol"] for w in portfolio.list_watchlist()}
     reports = {symbol: [] for symbol in symbols}
     tasks = request.app.state.store.list_tasks(status="completed")
     for task in sorted(tasks, key=lambda t: (t["date"], t["finished_at"] or ""), reverse=True):
         symbol = task["ticker"].strip().upper()
         if symbol in reports:
-            reports[symbol].append({"id": task["id"], "date": task["date"],
-                                    "finished_at": task["finished_at"], "rating": task["rating"]})
+            reports[symbol].append(
+                {
+                    "id": task["id"],
+                    "date": task["date"],
+                    "finished_at": task["finished_at"],
+                    "rating": task["rating"],
+                }
+            )
     reference = latest["target_date"] if latest and latest["results"] else None
-    return {"plans": plans, "latest_check": latest,
-            "summary": summarize(current, results, portfolio.get_settings()["concentration_limit"]),
-            "reports": reports, "reference_date": reference}
+    return {
+        "plans": plans,
+        "latest_check": latest,
+        "summary": summarize(current, results, portfolio.get_settings()["concentration_limit"]),
+        "reports": reports,
+        "reference_date": reference,
+    }

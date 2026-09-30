@@ -11,8 +11,11 @@ from web.portfolio.store import PortfolioStore
 from web.portfolio.worker import CloseCheckWorker, completed_date
 from web.store import Store
 
-CALENDAR = {"dates": ["2026-09-25", "2026-09-28", "2026-09-29", "2026-09-30", "2026-10-09"],
-            "covered_from": "2026-09-25", "covered_until": "2026-10-09"}
+CALENDAR = {
+    "dates": ["2026-09-25", "2026-09-28", "2026-09-29", "2026-09-30", "2026-10-09"],
+    "covered_from": "2026-09-25",
+    "covered_until": "2026-10-09",
+}
 
 
 def now(day=29, hour=16, minute=30):
@@ -31,8 +34,11 @@ class Market:
 
     def quote(self, item, date):
         self.calls.append(item["symbol"])
-        return quote(symbol=item["symbol"], price_date=date,
-                     error_code="missing_quote" if self.broken else None)
+        return quote(
+            symbol=item["symbol"],
+            price_date=date,
+            error_code="missing_quote" if self.broken else None,
+        )
 
     def stop(self):
         pass
@@ -47,9 +53,10 @@ def setup(tmp_path, market=None, clock=None):
     return store, worker, market
 
 
-@pytest.mark.parametrize("time,want", [(now(minute=29), "2026-09-28"),
-                                       (now(), "2026-09-29"),
-                                       (now(day=27), "2026-09-25")])
+@pytest.mark.parametrize(
+    "time,want",
+    [(now(minute=29), "2026-09-28"), (now(), "2026-09-29"), (now(day=27), "2026-09-25")],
+)
 def test_cutoff_and_weekend_use_latest_completed_session(time, want):
     assert completed_date(time, CALENDAR) == want
 
@@ -98,7 +105,7 @@ def test_retry_ceiling_and_half_hour_spacing(tmp_path):
 
 def test_preclose_and_weekend_do_not_backfill_automatic_checks(tmp_path):
     for index, time in enumerate([now(minute=29), now(day=27)]):
-        store, worker, market = setup(tmp_path / str(index), clock=lambda: time)
+        store, worker, market = setup(tmp_path / str(index), clock=lambda time=time: time)
         worker.tick()
         assert store.latest_check() is None
         assert market.calls == []

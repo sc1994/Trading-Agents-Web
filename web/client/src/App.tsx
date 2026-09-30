@@ -1,4 +1,5 @@
 import { ConfigProvider, Empty, Button, Tooltip } from "antd";
+import { useEffect, useState } from "react";
 import zhCN from "antd/locale/zh_CN";
 import {
   FileTextOutlined,
@@ -183,11 +184,21 @@ function Workbench() {
   );
 }
 export function App() {
+  const [reducedMotion, setReducedMotion] = useState(
+    () => window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+  );
+  useEffect(() => {
+    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const update = () => setReducedMotion(media.matches);
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
   return (
     <ConfigProvider
       locale={zhCN}
       theme={{
         token: {
+          motion: !reducedMotion,
           colorPrimary: "#1f7a55",
           colorSuccess: "#1f7a55",
           colorText: "#162b35",

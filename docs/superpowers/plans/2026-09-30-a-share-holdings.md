@@ -1,6 +1,6 @@
 # A-Share Holdings Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Add manually maintained A-share holdings/watchlists and trustworthy end-of-day observation checks to the private research workbench.
 
@@ -105,7 +105,7 @@ def test_portfolio_does_not_replace_existing_tasks(tmp_path):
 
 **Interfaces:** `AShareMarket(data_dir: Path, call: Callable | None = None)`; `search(query: str) -> dict`; `resolve(symbol: str) -> dict`; `calendar() -> dict`; `quote(instrument: dict, target_date: str) -> dict`; `stop() -> None`. Calendar carries sorted ISO `dates`, `covered_from`, `covered_until`, `source`, `fetched_at`. Instrument carries canonical `symbol`, `name`, `exchange`, `currency="CNY"`, `security_type="A_SHARE"`, `verified_at`. `call(operation: str, payload: dict, timeout: float) -> dict` is the injectable fetch boundary.
 
-- [ ] Write failing market tests using an injected callable; no production network requests:
+- [x] Write failing market tests using an injected callable; no production network requests:
 
 ```python
 from web.portfolio.market import AShareMarket
@@ -121,11 +121,11 @@ def test_stale_close_is_not_a_valid_quote(tmp_path):
     assert quote["error_code"] == "stale_quote"
 ```
 
-- [ ] Run `pytest tests/web/test_portfolio_market.py -q`; confirm red.
-- [ ] Implement trusted catalog adapters using `stock_info_sh_name_code` (A-share main board and STAR), `stock_info_sz_name_code` (A shares), and `stock_info_bj_name_code`; use `tool_trade_date_hist_sina` for calendar and `stock_zh_a_hist(period="daily", adjust="")` for nonadjusted bars. Validate the installed AKShare signatures in adapter tests. `fetch.py` runs via `[sys.executable, "-m", "web.portfolio.fetch", operation]`; write JSON payload to stdin, cap the child normalized JSON output at 4 MiB, use `communicate(timeout=20)`, terminate then kill and reap on timeout. Track active children for `stop`; never shell-interpolate user text. Return fixed error codes instead of upstream traces.
-- [ ] Cache catalog/calendar atomically under the private data directory. Publish a catalog only after validating nonempty SH/SZ/BJ coverage and identities; keep previous complete cache after refresh failure. Resolve naked or explicit symbols only against verified entries. Calendar coverage comes from the fetched range, not a fabricated future year-end; missing working-day coverage fails closed. Search decorates existing results with `supported` and `support_code`, and can find BJ entries from the catalog.
-- [ ] Test catalog outage, guessed prefixes, SH/SZ/BJ identity, non-A shares and ETF/B-share rejection, partial catalog, cache publication, stale/suspended quotes, currency mismatch, wrong symbol, malformed bars, nonadjusted provider argument, child timeout and child shutdown. Missing AKShare returns a fixed `market_dependency_missing` code, not an empty healthy catalog.
-- [ ] Run market tests and existing search/catalog tests; commit `feat: add verified bounded A-share close data`.
+- [x] Run `pytest tests/web/test_portfolio_market.py -q`; confirm red.
+- [x] Implement trusted catalog adapters using `stock_info_sh_name_code` (A-share main board and STAR), `stock_info_sz_name_code` (A shares), and `stock_info_bj_name_code`; use `tool_trade_date_hist_sina` for calendar and `stock_zh_a_hist(period="daily", adjust="")` for nonadjusted bars. Validate the installed AKShare signatures in adapter tests. `fetch.py` runs via `[sys.executable, "-m", "web.portfolio.fetch", operation]`; write JSON payload to stdin, cap the child normalized JSON output at 4 MiB, use `communicate(timeout=20)`, terminate then kill and reap on timeout. Track active children for `stop`; never shell-interpolate user text. Return fixed error codes instead of upstream traces.
+- [x] Cache catalog/calendar atomically under the private data directory. Publish a catalog only after validating nonempty SH/SZ/BJ coverage and identities; keep previous complete cache after refresh failure. Resolve naked or explicit symbols only against verified entries. Calendar coverage comes from the fetched range, not a fabricated future year-end; missing working-day coverage fails closed. Search decorates existing results with `supported` and `support_code`, and can find BJ entries from the catalog.
+- [x] Test catalog outage, guessed prefixes, SH/SZ/BJ identity, non-A shares and ETF/B-share rejection, partial catalog, cache publication, stale/suspended quotes, currency mismatch, wrong symbol, malformed bars, nonadjusted provider argument, child timeout and child shutdown. Missing AKShare returns a fixed `market_dependency_missing` code, not an empty healthy catalog.
+- [x] Run market tests and existing search/catalog tests; commit `feat: add verified bounded A-share close data`.
 
 ## Task 4: Independent End-of-Day Check Worker
 
@@ -135,7 +135,7 @@ def test_stale_close_is_not_a_valid_quote(tmp_path):
 
 **Interfaces:** `completed_date(now: datetime, calendar: dict) -> str` (raises DomainError on unverified coverage); `CloseCheckWorker(store: PortfolioStore, market: AShareMarket, clock: Callable[[], datetime] | None = None)`; `start()`, `stop()`, `request_check() -> dict`, `tick() -> None`. `tick` is deterministic and testable without starting a polling thread; `request_check` only enqueues and returns, with date resolution performed outside HTTP/DB transactions.
 
-- [ ] Write a failing cutoff test:
+- [x] Write a failing cutoff test:
 
 ```python
 from datetime import datetime
@@ -149,11 +149,11 @@ def test_before_cutoff_uses_previous_completed_session():
     assert completed_date(now, calendar) == "2026-09-28"
 ```
 
-- [ ] Run `pytest tests/web/test_portfolio_worker.py -q`; confirm red.
-- [ ] Implement one independent worker with bounded wake/shutdown, Store recovery and clock injection. Resolve dates from verified coverage, claim snapshots, fetch each distinct instrument once, evaluate every plan, then finish as completed/partial/failed. Preserve date signals alongside missing quote quality. Calendar failure sets check failure without normal price results.
-- [ ] Schedule current-session automatic runs at/after 16:30; skip weekends/verified holidays, empty portfolios and successful current-date checks. Record automatic attempt identity durably; three total attempts separated by 30 minutes. On restart recover running checks and do not backfill historical plans. Repeated manual calls reuse pending checks.
-- [ ] Test weekend/holiday/unknown calendar, cutoff equality, restart catch-up, no historical backfill, three-attempt ceiling, manual success suppression, retry intervals, duplicate enqueue, plan edits during fetch, missing quotes, cost pending, independent execution while `_RUN_LOCK` is held, and bounded stop that reaps children.
-- [ ] Run worker/domain/store/market tests; commit `feat: schedule durable end-of-day portfolio checks`.
+- [x] Run `pytest tests/web/test_portfolio_worker.py -q`; confirm red.
+- [x] Implement one independent worker with bounded wake/shutdown, Store recovery and clock injection. Resolve dates from verified coverage, claim snapshots, fetch each distinct instrument once, evaluate every plan, then finish as completed/partial/failed. Preserve date signals alongside missing quote quality. Calendar failure sets check failure without normal price results.
+- [x] Schedule current-session automatic runs at/after 16:30; skip weekends/verified holidays, empty portfolios and successful current-date checks. Record automatic attempt identity durably; three total attempts separated by 30 minutes. On restart recover running checks and do not backfill historical plans. Repeated manual calls reuse pending checks.
+- [x] Test weekend/holiday/unknown calendar, cutoff equality, restart catch-up, no historical backfill, three-attempt ceiling, manual success suppression, retry intervals, duplicate enqueue, plan edits during fetch, missing quotes, cost pending, independent execution while `_RUN_LOCK` is held, and bounded stop that reaps children.
+- [x] Run worker/domain/store/market tests; commit `feat: schedule durable end-of-day portfolio checks`.
 
 ## Task 5: Portfolio HTTP Contracts and Lifespan Wiring
 
@@ -165,7 +165,7 @@ def test_before_cutoff_uses_previous_completed_session():
 
 `create_app(..., portfolio_market: AShareMarket | None = None, portfolio_clock: Callable | None = None)` is the injection boundary. Retain executor semantics and all prior endpoints. No background requests for a fresh empty portfolio; legacy tests inject a market fake to remain network-free.
 
-- [ ] Write the failing non-A-share API test:
+- [x] Write the failing non-A-share API test:
 
 ```python
 def test_non_a_share_plan_rejected_without_mutation(portfolio_client):
@@ -176,20 +176,20 @@ def test_non_a_share_plan_rejected_without_mutation(portfolio_client):
     assert portfolio_client.get("/api/portfolio/plans").json()["plans"] == []
 ```
 
-- [ ] Add `portfolio_client` with verified fixture market/calendar/quotes. Run `pytest tests/web/test_portfolio_api.py -q`; confirm endpoint/import failure before implementation.
-- [ ] Wire independent store/market/worker into lifespan, stop both workers reliably, include the router, and add `/holdings` and `/watchlist` to the SPA allowlist. Use explicit 201 creation, 202 checks, 404 missing rows, 409 revision conflict, 422 unsupported/input failures and 503 unavailable market identity. Overview is cache/DB-only and marks obsolete result revisions rather than aggregating them.
-- [ ] Cover all CRUD, watch-to-plan identity, invalid fields/decimals, close conflicts, queue progress, partial/failure quality, security headers/cross-site writes, response privacy, exact report matching and analysis-date ordering. Verify current task deletion/rerun/report behavior stays unchanged.
-- [ ] Run `pytest tests/web -q` and portfolio domain/market/worker suites; commit `feat: expose portfolio management and check APIs`.
+- [x] Add `portfolio_client` with verified fixture market/calendar/quotes. Run `pytest tests/web/test_portfolio_api.py -q`; confirm endpoint/import failure before implementation.
+- [x] Wire independent store/market/worker into lifespan, stop both workers reliably, include the router, and add `/holdings` and `/watchlist` to the SPA allowlist. Use explicit 201 creation, 202 checks, 404 missing rows, 409 revision conflict, 422 unsupported/input failures and 503 unavailable market identity. Overview is cache/DB-only and marks obsolete result revisions rather than aggregating them.
+- [x] Cover all CRUD, watch-to-plan identity, invalid fields/decimals, close conflicts, queue progress, partial/failure quality, security headers/cross-site writes, response privacy, exact report matching and analysis-date ordering. Verify current task deletion/rerun/report behavior stays unchanged.
+- [x] Run `pytest tests/web -q` and portfolio domain/market/worker suites; commit `feat: expose portfolio management and check APIs`.
 
 ## Task 6: Holdings, Watchlist and Explicit Research Handoff
 
-**Progress:** Complete; production build and all 65 frontend tests passed. Navigation preserves the existing analysis root; portfolio handoff requires user confirmation and a date when no verified close exists.
+**Progress:** Complete; production build and all 66 frontend tests passed. Navigation preserves the existing analysis root; portfolio handoff requires user confirmation and a date when no verified close exists.
 
 **Files:** Create `web/client/src/portfolio/api.ts`, `InstrumentPicker.tsx`, `PlanForm.tsx`, their colocated tests, `pages/Holdings.tsx`, `pages/Watchlist.tsx`, page tests; modify `App.tsx`, `styles.css`, `pages/Start.tsx`, `pages/Start.test.tsx`, `App.test.tsx`.
 
 **Interfaces:** separate `PortfolioApi` mirrors Task 5 routes; `PlanInput` carries symbol/horizon/shares/cost/reason/lower/upper/review_date/cost_pending. `PlanForm({api, plan?, onSaved, onCancel})` preserves failed values and revision. `InstrumentPicker({api, value?, onChange})` rejects unsupported selections. `Holdings({api, navigate})` and `Watchlist({api, navigate})` consume the portfolio client separately from existing WebApi. `Start` accepts optional `{symbol,name,date}` prefill passed via React Router location state; missing verified date does not silently use an unverified portfolio date.
 
-- [ ] Write failing UI tests using fixture PortfolioApi, including visible disabled non-A-share options:
+- [x] Write failing UI tests using fixture PortfolioApi, including visible disabled non-A-share options:
 
 ```tsx
 it("explains why a non-A-share result cannot be selected", async () => {
@@ -205,21 +205,25 @@ it("explains why a non-A-share result cannot be selected", async () => {
 
 `fixturePortfolioApi()` is a typed local test helper defining every PortfolioApi method with inert or fixture results; create it with the first UI test, not as an undeclared production dependency.
 
-- [ ] Run `npm --prefix web/client test -- --run src/portfolio`; confirm import/component failure.
-- [ ] Implement API types and fixed Chinese error mapping without changing existing ApiError semantics. Use Ant Design icons, horizon Segmented, InputNumber stringMode for decimals, switches for booleans, explicit close confirmation and loading/empty/failure states. Preserve unsaved values after validation/conflict; do not auto-submit research.
-- [ ] Build holdings as unframed page bands and repeated plan rows grouped by stock, with check status/date/source, editable conditions and incomplete-summary notices. Display generic-research disclaimer near report links. Poll only while a check is pending and stop on unmount/terminal state. Build watchlist CRUD plus creation of a plan using verified identity.
-- [ ] Add routes/nav without moving the existing analysis root. Initialize prefill only after model settings load and retain it on retry; selection must match the prefilled instrument. Show unsupported BJ generic research if the existing data vendor cannot provide it rather than claiming guaranteed research coverage.
-- [ ] Cover create/edit/close, simultaneous same-stock horizons, condition toggles, pending-cost state, unavailable/stale check, revision mismatch, check retry, watchlist-to-plan, report association, preserved form inputs, defaults and prefill. Run `npm --prefix web/client test -- --run` and `npm --prefix web/client run build`; commit `feat: add holdings and watchlist workbench views`.
+- [x] Run `npm --prefix web/client test -- --run src/portfolio`; confirm import/component failure.
+- [x] Implement API types and fixed Chinese error mapping without changing existing ApiError semantics. Use Ant Design icons, horizon Segmented, InputNumber stringMode for decimals, switches for booleans, explicit close confirmation and loading/empty/failure states. Preserve unsaved values after validation/conflict; do not auto-submit research.
+- [x] Build holdings as unframed page bands and repeated plan rows grouped by stock, with check status/date/source, editable conditions and incomplete-summary notices. Display generic-research disclaimer near report links. Poll only while a check is pending and stop on unmount/terminal state. Build watchlist CRUD plus creation of a plan using verified identity.
+- [x] Add routes/nav without moving the existing analysis root. Initialize prefill only after model settings load and retain it on retry; selection must match the prefilled instrument. Show unsupported BJ generic research if the existing data vendor cannot provide it rather than claiming guaranteed research coverage.
+- [x] Cover create/edit/close, simultaneous same-stock horizons, condition toggles, pending-cost state, unavailable/stale check, revision mismatch, check retry, watchlist-to-plan, report association, preserved form inputs, defaults and prefill. Run `npm --prefix web/client test -- --run` and `npm --prefix web/client run build`; commit `feat: add holdings and watchlist workbench views`.
 
 ## Task 7: Headless Acceptance and PR Delivery
 
+**Progress:** Implementation, inline review and acceptance complete; delivery prepared for PR #23. Fresh full Python verification: 1028 passed, 2 skipped, 71 subtests passed (optional Bedrock dependency and live DeepSeek key absent). Frontend: 66 passed; production build passed with the existing bundle-size warning. Both acceptance scripts passed on desktop and mobile; portfolio acceptance additionally passed with ordinary and reduced motion. Scoped Ruff and whitespace checks passed. Live read-only AKShare probes confirmed catalog, calendar and an unadjusted daily close; fixture screenshots contain no real holdings.
+
+**Acceptance fixes:** Server rejects client-supplied check dates; shutdown no longer performs concurrent pipe reads; reduced motion is controlled by Ant Design rather than conflicting global CSS animation overrides. Existing acceptance fixtures now reset provider state between viewports. Review remains inline per the user's choice; no implementation or review subagents, merge or production deployment.
+
 **Files:** Create `web/client/scripts/portfolio-acceptance.mjs`; add fictitious screenshots under `docs/design/assets/`; modify README and the implementation plan progress boxes.
 
-- [ ] Add an acceptance script using the existing Playwright toolchain and a fixture HTTP server. Intercept market/portfolio endpoints with a verified fake 600000.SS short/long example plus stale data. Throw on console/page errors, failed assets, unexpected requests and body scroll-width overflow.
-- [ ] Run desktop 1440x1000 and mobile 390x844 workflows: view grouped plans, add a plan, reject NVDA, edit a threshold, close a plan, add a watch, transfer to a plan, enqueue/finish/partially fail checks, and inspect research prefill without creating an LLM task. Save holdings/watchlist/form screenshots using fictitious data only. Follow the existing acceptance harness for serving built assets; never give the user the private local URL.
-- [ ] Run fresh verification: `pytest tests/web -q`; `npm --prefix web/client test -- --run`; `npm --prefix web/client run build`; `node web/client/scripts/portfolio-acceptance.mjs`; `git diff --check`. Run relevant core symbol/report regression suites and existing acceptance script where dependencies are available; record actual commands/results, not presumed success.
-- [ ] Review the diff against every spec section, especially market rejection, calendar coverage, quote freshness, automatic retry durability, financial data privacy, calculation口径 and missing-data messages. Resolve defects with a failing regression test before changing code.
-- [ ] Commit docs/screenshots and verified changes, push the branch, update PR #23 with implementation scope and evidence, and mark it ready for review. Do not merge or deploy. Deliver the PR link and representative desktop/mobile screenshots; call out non-trading-grade source limitations and manual holding maintenance.
+- [x] Add an acceptance script using the existing Playwright toolchain and a fixture HTTP server. Intercept market/portfolio endpoints with a verified fake 600000.SS short/long example plus stale data. Throw on console/page errors, failed assets, unexpected requests and body scroll-width overflow.
+- [x] Run desktop 1440x1000 and mobile 390x844 workflows: view grouped plans, add a plan, reject NVDA, edit a threshold, close a plan, add a watch, transfer to a plan, enqueue/finish/partially fail checks, and inspect research prefill without creating an LLM task. Save holdings/watchlist/form screenshots using fictitious data only. Follow the existing acceptance harness for serving built assets; never give the user the private local URL.
+- [x] Run fresh verification: `pytest tests/web -q`; `npm --prefix web/client test -- --run`; `npm --prefix web/client run build`; `node web/client/scripts/portfolio-acceptance.mjs`; `git diff --check`. Run relevant core symbol/report regression suites and existing acceptance script where dependencies are available; record actual commands/results, not presumed success.
+- [x] Review the diff against every spec section, especially market rejection, calendar coverage, quote freshness, automatic retry durability, financial data privacy, calculation口径 and missing-data messages. Resolve defects with a failing regression test before changing code.
+- [x] Commit docs/screenshots and verified changes, push the branch, update PR #23 with implementation scope and evidence, and mark it ready for review. Do not merge or deploy. Deliver the PR link and representative desktop/mobile screenshots; call out non-trading-grade source limitations and manual holding maintenance.
 
 ## Self-Review Mapping
 

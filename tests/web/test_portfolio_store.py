@@ -9,8 +9,14 @@ from web.store import Store
 
 
 def instrument(symbol="600000.SS"):
-    return {"symbol": symbol, "name": "Fixture", "exchange": "SH", "currency": "CNY",
-            "security_type": "A_SHARE", "verified_at": "2026-09-29T09:00:00Z"}
+    return {
+        "symbol": symbol,
+        "name": "Fixture",
+        "exchange": "SH",
+        "currency": "CNY",
+        "security_type": "A_SHARE",
+        "verified_at": "2026-09-29T09:00:00Z",
+    }
 
 
 @pytest.fixture
@@ -21,8 +27,7 @@ def portfolio(tmp_path):
 
 
 def inputs(**changes):
-    return {"symbol": "600000.SS", "horizon": "short", "shares": 1000, "cost": "10.2",
-            **changes}
+    return {"symbol": "600000.SS", "horizon": "short", "shares": 1000, "cost": "10.2", **changes}
 
 
 def test_portfolio_does_not_replace_existing_tasks(tmp_path):
@@ -113,7 +118,9 @@ def test_watchlist_limit_counts_distinct_active_stocks(portfolio):
 
 def test_settings_are_separate_and_threshold_validated(portfolio):
     assert portfolio.update_settings({"automatic": False, "concentration_limit": "30"}) == {
-        "automatic": False, "concentration_limit": "30"}
+        "automatic": False,
+        "concentration_limit": "30",
+    }
     with pytest.raises(DomainError):
         portfolio.update_settings({"concentration_limit": "101"})
     assert portfolio.store.get_settings() == {}
