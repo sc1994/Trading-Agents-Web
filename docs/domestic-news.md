@@ -1,17 +1,25 @@
 # Domestic News Sources
 
-Mainland equity news is routed to domestic sources by default. US and Hong Kong
-tickers retain the configured vendor. This changes news retrieval only, not
+Mainland equity news is routed to domestic sources by default. Other markets,
+including US and Hong Kong equities, keep the configured vendor AND automatically
+retrieve supplementary Chinese company news. Global news also combines the
+configured vendor with Chinese macro feeds. This changes news retrieval only, not
 prices, financial statements, trading or deployment.
 
 ## Sources
 
 - Eastmoney: company-code news searches ordered by time. If announcements supply
   a verified company name, it is also searched. Results can mention a company
-  incidentally; analysts must assess relevance.
+  incidentally; analysts must assess relevance. HK/US Chinese names come from the
+  public suggestion directory only after an exact code and market match. HK
+  queries use qualified symbols (e.g. `0780.HK`, `00780.HK`) and the verified
+  name (`同程旅行`), never an ambiguous bare numeric code. Non-mainland results
+  must mention an alias/name with alphanumeric boundaries. Directory names are
+  current identities, not a point-in-time historical company-name archive.
 - CNINFO: company announcements with original PDF links. Returned securities are
   checked against the requested code. PDF bodies are not automatically read;
   reports explicitly identify metadata-only evidence and date-only timestamps.
+  Mainland equities only: HK/US instruments never query this disclosure endpoint.
 - Sina Finance and WallstreetCN: recent public market-news feeds.
 - CLS: public telegraph-page excerpts. Static parsing is attempted first; a
   headless browser loads the public page when client-side rendering is needed.
@@ -19,7 +27,13 @@ prices, financial statements, trading or deployment.
 The A-share news analyst uses company news plus domestic market news. Its sentiment
 analyst assesses news/events, not community opinions. It does not request Reddit
 or StockTwits. With no dated company evidence, it abstains without generating a
-neutral score.
+neutral score. HK/US sentiment retains available overseas communities and uses
+the combined company-news block. All markets abstain with `DATA_INSUFFICIENT`
+when no article/social records were retrieved. Chinese macro feeds are context,
+not company-sentiment evidence. Chinese news is not forum discussion: Xueqiu and
+Eastmoney Guba are not integrated. Independent source failures do not erase
+healthy company or global-news sources. New evidence policy/config changes
+invalidate older graph checkpoints, so they cannot silently resume old reports.
 
 ## Browser Setup
 
@@ -46,7 +60,7 @@ The existing Python config accepts these keys:
 
 | Key | Default | Purpose |
 | --- | --- | --- |
-| `china_news_enabled` | `True` | Automatic mainland-equity routing; `False` restores configured vendors |
+| `china_news_enabled` | `True` | Domestic routing for mainland equities, supplementary company/global news elsewhere; `False` restores configured vendors |
 | `china_news_browser_fallback` | `True` | Enable public-browser fallback and CLS enrichment |
 | `china_news_timeout` | `10` | HTTP timeout in seconds per request |
 | `china_news_browser_timeout` | `20` | Browser-attempt budget in seconds, capped at 60 |
@@ -55,8 +69,8 @@ The existing Python config accepts these keys:
 
 `news_article_limit` and `global_news_article_limit` cap returned articles.
 The `china` vendor is also registered for `get_news` and `get_global_news` for
-explicit configuration. Do not select it globally for mixed-market stock runs;
-automatic mainland routing is preferable.
+explicit configuration. Keep the existing primary vendor to preserve overseas
+coverage; automatic supplementation is preferable to selecting `china` globally.
 
 All items require dates and original links. Filtering uses Asia/Shanghai calendar
 days, with an exclusive midnight-after upper bound. Reports disclose source
@@ -68,6 +82,7 @@ Deduplication uses normalized title and publication date, within each report.
 
 ```bash
 python -m pytest tests/test_china_news.py
+python -m pytest tests/test_cross_market_news.py
 ```
 
 Live smoke check (requires network; no LLM credentials):
