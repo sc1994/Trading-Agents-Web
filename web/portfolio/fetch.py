@@ -10,12 +10,18 @@ import sys
 def fetch(operation: str, payload: dict, ak) -> dict:
     if operation == "catalog":
         items = []
-        sources = [
-            ("SH", ak.stock_info_sh_name_code(symbol="主板A股"), "证券代码", "证券简称"),
-            ("SH", ak.stock_info_sh_name_code(symbol="科创板"), "证券代码", "证券简称"),
-            ("SZ", ak.stock_info_sz_name_code(symbol="A股列表"), "A股代码", "A股简称"),
-            ("BJ", ak.stock_info_bj_name_code(), "证券代码", "证券简称"),
-        ]
+        exchange = payload["exchange"]
+        if exchange == "SH":
+            sources = [
+                ("SH", ak.stock_info_sh_name_code(symbol="主板A股"), "证券代码", "证券简称"),
+                ("SH", ak.stock_info_sh_name_code(symbol="科创板"), "证券代码", "证券简称"),
+            ]
+        elif exchange == "SZ":
+            sources = [("SZ", ak.stock_info_sz_name_code(symbol="A股列表"), "A股代码", "A股简称")]
+        elif exchange == "BJ":
+            sources = [("BJ", ak.stock_info_bj_name_code(), "证券代码", "证券简称")]
+        else:
+            raise ValueError("unsupported exchange")
         for exchange, frame, code_key, name_key in sources:
             for _, row in frame.iterrows():
                 code, name = str(row[code_key]).strip(), str(row[name_key]).strip()

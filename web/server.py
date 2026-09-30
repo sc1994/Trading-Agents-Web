@@ -53,6 +53,8 @@ def create_app(
         app.state.portfolio_worker = close_worker
         await run_in_threadpool(worker.start)
         try:
+            if hasattr(market, "start"):
+                await run_in_threadpool(market.start)
             await run_in_threadpool(close_worker.start)
             yield
         finally:

@@ -64,6 +64,18 @@ Research handoff requires confirmation and remains generic single-stock research
 the model does not receive these holdings, costs or investment horizons. Opportunity
 ranking, imports, external notifications and automatic trading are not included.
 
+The portfolio identity catalog is cached independently for SH/SZ/BJ. Each exchange
+refreshes in the background at startup and after 24 hours, with a 20-second fetch
+deadline, single-flight requests and five-minute retry spacing after failures.
+Search and saving read the local identity cache without waiting for a catalog fetch.
+Verified identities less than seven days old remain usable during an outage, with
+their verification date shown; expired or never-verified identities cannot be added.
+One exchange failing does not disable other exchanges. Existing combined catalogs
+are migrated without renewing their timestamps. This grace period applies only to
+stock identity, never to the quote date or trading-calendar coverage used in checks.
+The search response includes safe per-exchange status/reason codes; server warnings
+contain exchange and fixed error code only, not financial records or provider traces.
+
 For fixture-only desktop/mobile acceptance, build the client and run
 `node web/client/scripts/portfolio-acceptance.mjs`. It intercepts API calls, sends no
 orders or model requests, and saves fictitious screenshots in `docs/design/assets/`.

@@ -70,6 +70,7 @@ def invoke(function, *args, **kwargs):
             if error.code
             in {
                 "catalog_unavailable",
+                "catalog_loading",
                 "calendar_unavailable",
                 "market_unavailable",
                 "worker_stopped",

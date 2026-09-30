@@ -27,6 +27,7 @@ export function Watchlist({
   const [referenceDate, setReferenceDate] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [editor, setEditor] = useState<Watch | "new" | null>(null);
+  const [editorSession, setEditorSession] = useState(0);
   const [selected, setSelected] = useState<Instrument>();
   const [reason, setReason] = useState("");
   const [holding, setHolding] = useState<Instrument>();
@@ -62,6 +63,7 @@ export function Watchlist({
     };
   }, [api]);
   function edit(value: Watch | "new") {
+    setEditorSession((session) => session + 1);
     setEditor(value);
     setSelected(value === "new" ? undefined : value);
     setReason(value === "new" ? "" : value.reason);
@@ -158,6 +160,7 @@ export function Watchlist({
       <Modal
         title={editor === "new" ? "添加自选股" : "编辑关注理由"}
         open={!!editor}
+        destroyOnHidden
         onCancel={() => setEditor(null)}
         confirmLoading={saving}
         okText="保存"
@@ -188,12 +191,15 @@ export function Watchlist({
         )}
         <div className="watch-form-field">
           <label>股票</label>
-          <InstrumentPicker
-            api={api}
-            value={selected}
-            onChange={setSelected}
-            disabled={editor !== "new"}
-          />
+          {editor && (
+            <InstrumentPicker
+              key={editorSession}
+              api={api}
+              value={selected}
+              onChange={setSelected}
+              disabled={editor !== "new"}
+            />
+          )}
         </div>
         <div className="watch-form-field">
           <label htmlFor="watch-reason">关注理由</label>

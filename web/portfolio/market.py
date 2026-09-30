@@ -1,18 +1,25 @@
 """Verified A-share identities and conservative cached market observations."""
 
 import json
+import logging
 import os
 import re
 import subprocess
 import sys
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from threading import RLock
+from threading import Event, Lock, RLock, Thread
 
 from web.portfolio.domain import DomainError, iso_date, positive_decimal
 from web.search import search_symbols
 from web.store import _now
+
+EXCHANGES = {"SH": "SS", "SZ": "SZ", "BJ": "BJ"}
+CATALOG_FRESH = timedelta(days=1)
+CATALOG_USABLE = timedelta(days=7)
+CATALOG_RETRY = timedelta(minutes=5)
+logger = logging.getLogger(__name__)
 
 
 class BoundedFetch:
@@ -84,17 +91,25 @@ class BoundedFetch:
 
 
 class AShareMarket:
-    def __init__(self, data_dir: Path, call=None):
+    def __init__(self, data_dir: Path, call=None, clock=None):
         self.directory = Path(data_dir) / "portfolio-market"
         self.directory.mkdir(mode=0o700, parents=True, exist_ok=True)
         self.call = call or BoundedFetch()
+        self.clock = clock or (lambda: datetime.now(timezone.utc))
         self._lock = RLock()
+        self._calendar_lock = Lock()
+        self._catalog_locks = {exchange: Lock() for exchange in EXCHANGES}
+        self._attempts, self._errors = {}, {}
+        self._refreshing = set()
+        self._stopping = Event()
+        self._threads = []
+        self._migrate_catalog()
 
-    def _read(self, name: str) -> dict | None:
+    def _read(self, name: str, max_age=CATALOG_FRESH) -> dict | None:
         try:
             value = json.loads((self.directory / f"{name}.json").read_text(encoding="utf-8"))
             fetched = datetime.fromisoformat(value["fetched_at"])
-            if not 0 <= (datetime.now(timezone.utc) - fetched).total_seconds() < 86400:
+            if not timedelta(0) <= self.clock() - fetched < max_age:
                 return None
             return value
         except (OSError, ValueError, KeyError, TypeError):
@@ -115,38 +130,181 @@ class AShareMarket:
             if temporary is not None:
                 temporary.unlink(missing_ok=True)
 
-    def refresh_catalog(self) -> dict:
-        try:
-            raw = self.call("catalog", {}, 20)
-            items, now = {}, _now()
-            for item in raw["instruments"]:
-                symbol, exchange = item["symbol"], item["exchange"]
-                suffix = {"SH": "SS", "SZ": "SZ", "BJ": "BJ"}.get(exchange)
-                if (
-                    not suffix
-                    or not re.fullmatch(r"\d{6}\." + suffix, symbol)
-                    or item.get("currency") != "CNY"
-                    or item.get("security_type") != "A_SHARE"
-                    or not isinstance(item.get("name"), str)
-                    or not item["name"].strip()
-                ):
-                    raise ValueError("invalid identity")
-                items[symbol] = {**item, "verified_at": now}
-            if {item["exchange"] for item in items.values()} != {"SH", "SZ", "BJ"}:
-                raise ValueError("partial catalog")
-            value = {
-                "instruments": list(items.values()),
-                "fetched_at": now,
-                "source": raw.get("source", "akshare_exchange_catalog"),
+    @staticmethod
+    def _validate_catalog(raw: dict, exchange: str, fetched_at: str) -> dict:
+        items = {}
+        for item in raw["instruments"]:
+            symbol = item["symbol"]
+            if (
+                item.get("exchange") != exchange
+                or not re.fullmatch(r"\d{6}\." + EXCHANGES[exchange], symbol)
+                or item.get("currency") != "CNY"
+                or item.get("security_type") != "A_SHARE"
+                or not isinstance(item.get("name"), str)
+                or not item["name"].strip()
+                or symbol in items
+            ):
+                raise ValueError("invalid identity")
+            # Only publish trusted fields, never provider diagnostics or arbitrary URLs.
+            items[symbol] = {
+                "symbol": symbol,
+                "name": item["name"].strip(),
+                "exchange": exchange,
+                "currency": "CNY",
+                "security_type": "A_SHARE",
+                "verified_at": fetched_at,
             }
-            self._publish("catalog", value)
-            return value
-        except Exception:
-            raise DomainError("catalog_unavailable", "symbol") from None
+        if not items:
+            raise ValueError("empty catalog")
+        return {
+            "instruments": list(items.values()),
+            "fetched_at": fetched_at,
+            "source": "akshare_exchange_catalog",
+        }
+
+    def _cached_catalog(self, exchange, max_age=CATALOG_USABLE):
+        value = self._read(f"catalog-{exchange.lower()}", max_age)
+        if value:
+            try:
+                return self._validate_catalog(value, exchange, value["fetched_at"])
+            except (KeyError, ValueError, TypeError):
+                pass
+        return None
+
+    def _migrate_catalog(self):
+        legacy = self._read("catalog", CATALOG_USABLE)
+        if not legacy:
+            return
+        for exchange in EXCHANGES:
+            name = f"catalog-{exchange.lower()}"
+            if (self.directory / f"{name}.json").exists():
+                continue
+            try:
+                raw = {
+                    "instruments": [
+                        i for i in legacy["instruments"] if i.get("exchange") == exchange
+                    ]
+                }
+                value = self._validate_catalog(raw, exchange, legacy["fetched_at"])
+                self._publish(name, value)
+            except (OSError, KeyError, ValueError, TypeError, AttributeError):
+                logger.warning("portfolio catalog migration failed exchange=%s", exchange)
+
+    def refresh_catalog(self, exchange: str | None = None) -> dict:
+        if exchange is None:
+            for name in EXCHANGES:
+                self.refresh_catalog(name)
+            return self._catalog()
+        if exchange not in EXCHANGES:
+            raise DomainError("unsupported_market")
+        # Independent single-flight locks never block cache-only readers or other markets.
+        with self._catalog_locks[exchange]:
+            now = self.clock()
+            cached = self._cached_catalog(exchange)
+            if cached and now - datetime.fromisoformat(cached["fetched_at"]) < CATALOG_FRESH:
+                return cached
+            with self._lock:
+                previous = self._attempts.get(exchange)
+                if self._stopping.is_set() or (previous and now - previous < CATALOG_RETRY):
+                    return cached or {}
+                self._attempts[exchange] = now
+                self._refreshing.add(exchange)
+            error = None
+            try:
+                raw = self.call("catalog", {"exchange": exchange}, 20)
+                try:
+                    value = self._validate_catalog(raw, exchange, self.clock().isoformat())
+                except (KeyError, ValueError, TypeError):
+                    raise DomainError("catalog_invalid") from None
+                try:
+                    self._publish(f"catalog-{exchange.lower()}", value)
+                except OSError:
+                    raise DomainError("cache_write_failed") from None
+                return value
+            except DomainError as failure:
+                error = (
+                    failure.code
+                    if failure.code
+                    in {
+                        "market_timeout",
+                        "market_dependency_missing",
+                        "catalog_invalid",
+                        "cache_write_failed",
+                        "market_stopped",
+                    }
+                    else "market_unavailable"
+                )
+                return cached or {}
+            except Exception:
+                error = "market_unavailable"
+                return cached or {}
+            finally:
+                with self._lock:
+                    self._refreshing.discard(exchange)
+                    self._errors[exchange] = error
+                if error and not self._stopping.is_set():
+                    logger.warning(
+                        "portfolio catalog refresh failed exchange=%s code=%s", exchange, error
+                    )
 
     def _catalog(self):
+        items, statuses = [], []
+        for exchange in EXCHANGES:
+            cached = self._cached_catalog(exchange)
+            with self._lock:
+                refreshing = exchange in self._refreshing or bool(
+                    self._threads
+                    and not self._stopping.is_set()
+                    and not cached
+                    and exchange not in self._attempts
+                )
+                error = self._errors.get(exchange)
+            archived = cached or self._cached_catalog(exchange, timedelta(days=36500))
+            fetched = archived["fetched_at"] if archived else None
+            state = (
+                "fresh"
+                if cached and self.clock() - datetime.fromisoformat(fetched) < CATALOG_FRESH
+                else "stale"
+                if cached
+                else "expired"
+                if archived
+                else "loading"
+                if refreshing
+                else "unavailable"
+            )
+            statuses.append(
+                {
+                    "exchange": exchange,
+                    "state": state,
+                    "fetched_at": fetched,
+                    "refreshing": refreshing,
+                    "error_code": error,
+                }
+            )
+            if cached:
+                items.extend(
+                    {**item, "catalog_state": state, "catalog_fetched_at": fetched}
+                    for item in cached["instruments"]
+                )
+        return {"instruments": items, "catalog_status": statuses}
+
+    def start(self):
         with self._lock:
-            return self._read("catalog") or self.refresh_catalog()
+            if self._threads or self._stopping.is_set():
+                return
+            self._threads = [
+                Thread(
+                    target=self._refresh_loop, args=(e,), name=f"portfolio-catalog-{e}", daemon=True
+                )
+                for e in EXCHANGES
+            ]
+            for thread in self._threads:
+                thread.start()
+
+    def _refresh_loop(self, exchange):
+        while not self._stopping.is_set():
+            self.refresh_catalog(exchange)
+            self._stopping.wait(30)
 
     def resolve(self, symbol: str) -> dict:
         if not isinstance(symbol, str):
@@ -154,24 +312,34 @@ class AShareMarket:
         symbol = symbol.strip().upper()
         if not re.fullmatch(r"\d{6}(?:\.(?:SS|SZ|BJ))?", symbol):
             raise DomainError("unsupported_market", "symbol")
-        items = self._catalog()["instruments"]
+        catalog = self._catalog()
+        items = catalog["instruments"]
         matches = [
             item
             for item in items
             if item["symbol"] == symbol or (len(symbol) == 6 and item["symbol"][:6] == symbol)
         ]
         if len(matches) != 1:
+            relevant = [
+                s
+                for s in catalog["catalog_status"]
+                if len(symbol) == 6 or EXCHANGES[s["exchange"]] == symbol[7:]
+            ]
+            if any(s["state"] in {"loading", "expired", "unavailable"} for s in relevant):
+                raise DomainError(
+                    "catalog_loading"
+                    if any(s["refreshing"] for s in relevant)
+                    else "catalog_unavailable",
+                    "symbol",
+                )
             raise DomainError("instrument_unverified", "symbol")
         return matches[0].copy()
 
     def search(self, query: str) -> dict:
         if not isinstance(query, str) or not 2 <= len(query.strip()) <= 64:
             raise DomainError("invalid_query", "q")
-        available = True
-        try:
-            catalog = self._catalog()["instruments"]
-        except DomainError:
-            catalog, available = [], False
+        snapshot = self._catalog()
+        catalog, statuses = snapshot["instruments"], snapshot["catalog_status"]
         needle = query.strip().casefold()
         local = [
             item
@@ -180,29 +348,36 @@ class AShareMarket:
         ]
         if local:
             rows = [{**item, "supported": True, "support_code": None} for item in local[:8]]
-            return {"results": rows, "unavailable": False}
+            return {"results": rows, "unavailable": False, "catalog_status": statuses}
         lookup = search_symbols(query)
         verified = {item["symbol"]: item for item in catalog}
         rows = []
         for item in lookup["results"]:
             symbol = item["symbol"].upper()
             supported = symbol in verified
+            status = next((s for s in statuses if EXCHANGES[s["exchange"]] == symbol[7:]), None)
             code = (
                 None
                 if supported
                 else "unsupported_market"
                 if not re.fullmatch(r"\d{6}\.(?:SS|SZ|BJ)", symbol)
                 else "instrument_unverified"
-                if available
+                if status and status["state"] in {"fresh", "stale"}
+                else "catalog_loading"
+                if status and status["refreshing"]
                 else "catalog_unavailable"
             )
             rows.append(
                 {**item, **verified.get(symbol, {}), "supported": supported, "support_code": code}
             )
-        return {"results": rows, "unavailable": lookup["unavailable"] or not available}
+        return {
+            "results": rows,
+            "unavailable": lookup["unavailable"] or not catalog,
+            "catalog_status": statuses,
+        }
 
     def calendar(self) -> dict:
-        with self._lock:
+        with self._calendar_lock:
             cached = self._read("calendar")
             if cached:
                 return cached
@@ -258,5 +433,8 @@ class AShareMarket:
             return {**base, "error_code": "market_unavailable"}
 
     def stop(self):
+        self._stopping.set()
         if hasattr(self.call, "stop"):
             self.call.stop()
+        for thread in self._threads:
+            thread.join(timeout=1)

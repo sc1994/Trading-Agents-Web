@@ -7,6 +7,15 @@ export interface Instrument {
   verified_at?: string;
   supported?: boolean;
   support_code?: string | null;
+  catalog_state?: "fresh" | "stale";
+  catalog_fetched_at?: string;
+}
+export interface CatalogStatus {
+  exchange: "SH" | "SZ" | "BJ";
+  state: "fresh" | "stale" | "expired" | "loading" | "unavailable";
+  fetched_at: string | null;
+  refreshing: boolean;
+  error_code: string | null;
 }
 export interface PlanInput {
   symbol: string;
@@ -93,7 +102,11 @@ export interface PortfolioApi {
   searchInstruments(
     query: string,
     signal?: AbortSignal,
-  ): Promise<{ results: Instrument[]; unavailable: boolean }>;
+  ): Promise<{
+    results: Instrument[];
+    unavailable: boolean;
+    catalog_status?: CatalogStatus[];
+  }>;
   getOverview(): Promise<Overview>;
   listWatchlist(): Promise<{ watchlist: Watch[] }>;
   addWatch(symbol: string, reason: string): Promise<Watch>;
@@ -114,6 +127,7 @@ const messages: Record<string, string> = {
   unsupported_market: "当前持仓与收盘检查仅支持 A 股",
   instrument_unverified: "暂时无法确认这只股票的 A 股身份，请重新选择。",
   catalog_unavailable: "A 股名录暂不可用，请稍后重试。",
+  catalog_loading: "股票名录正在后台加载，完成后可选择。",
   calendar_unavailable: "交易日历不可用，无法确认收盘检查日期。",
   market_dependency_missing: "行情依赖未安装，请安装项目的 search 可选依赖。",
   revision_conflict: "持仓已被修改，请刷新后重新编辑。当前输入已保留。",
