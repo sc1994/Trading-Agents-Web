@@ -15,6 +15,7 @@ import requests
 from parsel import Selector
 
 from .config import get_config
+from .symbol_utils import normalize_symbol
 
 logger = logging.getLogger(__name__)
 SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -106,6 +107,48 @@ def _get(url, **kwargs):
     )
     response.raise_for_status()
     return response
+
+
+def _news_keywords(ticker: str) -> list[str]:
+    """Use qualified aliases and only names whose code AND market match."""
+    symbol = normalize_symbol(ticker)
+    hk = re.fullmatch(r"(\d{1,5})\.HK", symbol)
+    us = re.fullmatch(r"[A-Z]+(?:[.-][A-Z]+)?", symbol)
+    keywords = [symbol]
+    if not hk and not us:
+        return keywords
+    query = hk[1].zfill(5) if hk else symbol
+    if hk:
+        keywords = list(dict.fromkeys([symbol, query + ".HK"]))
+    try:
+        rows = _get(
+            "https://searchapi.eastmoney.com/api/suggest/get",
+            params={"input": query, "type": "14", "count": "8",
+                    "token": "D43BF722C8E33BDC906FB84D85E326E8"},
+        ).json().get("QuotationCodeTable", {}).get("Data", []) or []
+        for row in rows:
+            matches = (
+                row.get("Classify") == "HK" and row.get("TypeUS") == "3"
+                and row.get("Code") == query
+            ) if hk else (
+                row.get("Classify") == "UsStock" and row.get("TypeUS") in {"1", "3", "10"}
+                and str(row.get("Code", "")).replace("_", "-").upper() == symbol
+            )
+            name = _clean(row.get("Name"))
+            if matches and name:
+                keywords.append(name)
+                break
+    except Exception as exc:
+        logger.warning("Domestic company-name lookup failed: %s", type(exc).__name__)
+    return list(dict.fromkeys(keywords))
+
+
+def _relevant(item: NewsItem, keywords: list[str]) -> bool:
+    text = item.title + " " + item.content
+    return any(
+        re.search(r"(?<![A-Za-z0-9])" + re.escape(keyword) + r"(?![A-Za-z0-9])", text, re.I)
+        for keyword in keywords
+    )
 
 
 def parse_eastmoney(text: str) -> list[NewsItem]:
@@ -327,16 +370,14 @@ def _cached(key, build):
 def get_china_stock_news(ticker: str, start_date: str, end_date: str) -> str:
     _window(start_date, end_date)
     code = china_stock_code(ticker)
-    if not code:
-        raise ValueError("Domestic stock news requires a mainland equity ticker")
     settings = get_config()
     pages = min(3, max(1, settings["china_news_max_pages"]))
 
     def build():
         announcements, ann_status = _source(
             "CNINFO", lambda: _fetch_cninfo(code, start_date, end_date, pages)
-        )
-        keywords = [code]
+        ) if code else ([], "CNINFO mainland announcements: not applicable to this instrument.")
+        keywords = [code] if code else _news_keywords(ticker)
         if announcements and announcements[0].company_name:
             keywords.append(announcements[0].company_name)
         news, statuses = [], [ann_status]
@@ -346,15 +387,19 @@ def get_china_stock_news(ticker: str, start_date: str, end_date: str) -> str:
             )
             news.extend(rows)
             statuses.append(status)
+        if not code:
+            news = [row for row in news if _relevant(row, keywords)]
         return (
             f"## {ticker}: domestic news and official announcements ({start_date} to {end_date})\n"
             "News search matches may only mention the company; assess relevance. "
             "These are event/news inputs, not retail community sentiment. "
             f"Public retrieval is capped at {pages} pages per query; historical coverage is not guaranteed.\n\n"
+            f"Search aliases: {', '.join(keywords)}\n\n"
             "### Company news\n"
             + render_news(news, start_date, end_date, settings["news_article_limit"])
             + "\n\n### Official announcements\n"
-            + render_news(announcements, start_date, end_date, settings["news_article_limit"])
+            + (render_news(announcements, start_date, end_date, settings["news_article_limit"])
+               if code else "CNINFO: not applicable; no mainland disclosure query was made.")
             + "\n\n"
             + "\n".join(status for status in statuses if status)
         )

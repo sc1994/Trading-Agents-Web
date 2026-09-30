@@ -401,6 +401,10 @@ class TradingAgentsGraph:
             f"debate={self.config['max_debate_rounds']}",
             f"risk={self.config['max_risk_discuss_rounds']}",
             f"asset={asset_type}",
+            *([
+                "news_evidence=v2",
+                f"china_news={self.config.get('china_news_enabled', True)}",
+            ] if {"news", "social"}.intersection(self.selected_analysts) else []),
         ])
 
     def propagate(self, company_name, trade_date, asset_type: str = "stock"):

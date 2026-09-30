@@ -393,6 +393,14 @@ def _structured_sentiment_llm(captured: dict, report: SentimentReport | None = N
 
 @pytest.mark.unit
 class TestSentimentAnalystAgent:
+    @pytest.fixture(autouse=True)
+    def evidence(self, monkeypatch):
+        from tradingagents.agents.analysts import sentiment_analyst as analyst
+
+        monkeypatch.setattr(analyst.get_news, "func", lambda *a: "### Company event\nPublished: 2026-01-15T09:00:00+00:00\nLink: https://example.com/news")
+        monkeypatch.setattr(analyst, "fetch_stocktwits_messages", lambda *a, **k: "<unavailable>")
+        monkeypatch.setattr(analyst, "fetch_reddit_posts", lambda *a, **k: "<unavailable>")
+
     def test_structured_path_produces_rendered_markdown(self):
         captured = {}
         report = SentimentReport(

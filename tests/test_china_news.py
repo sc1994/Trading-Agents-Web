@@ -152,13 +152,14 @@ def test_public_browser_fallback_only_on_failure(monkeypatch, config):
     assert "Browser evidence" in out
 
 
-def test_a_share_tool_uses_domestic_source_but_us_keeps_vendor(monkeypatch):
+def test_a_share_tool_uses_domestic_source_and_us_is_supplemented(monkeypatch):
     from tradingagents.agents.utils import news_data_tools as tools
 
     monkeypatch.setattr(china(), "get_china_stock_news", lambda *a: "DOMESTIC")
     monkeypatch.setattr(tools, "route_to_vendor", lambda *a: "US_VENDOR")
     assert tools.get_news.func("600519.SS", "2026-09-23", "2026-09-30") == "DOMESTIC"
-    assert tools.get_news.func("AAPL", "2026-09-23", "2026-09-30") == "US_VENDOR"
+    result = tools.get_news.func("AAPL", "2026-09-23", "2026-09-30")
+    assert "US_VENDOR" in result and "DOMESTIC" in result
 
 
 def test_a_share_sentiment_never_fetches_overseas_communities(monkeypatch):

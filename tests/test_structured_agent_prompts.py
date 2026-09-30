@@ -113,7 +113,7 @@ def test_sentiment_prompt_states_constraint(monkeypatch):
     # Pre-fetched sources are stubbed so the prompt builds without network I/O.
     monkeypatch.setattr(sentiment, "fetch_stocktwits_messages", lambda *a, **k: "st")
     monkeypatch.setattr(sentiment, "fetch_reddit_posts", lambda *a, **k: "rd")
-    monkeypatch.setattr(sentiment.get_news, "func", lambda *a, **k: "news", raising=False)
+    monkeypatch.setattr(sentiment.get_news, "func", lambda *a, **k: "### Company event\nPublished: 2026-01-15T09:00:00+00:00\nLink: https://example.com/news", raising=False)
 
     captured = {}
     llm = _capturing_llm(captured, SentimentReport(
