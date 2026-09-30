@@ -19,7 +19,9 @@ COPY pyproject.toml README.md ./
 COPY tradingagents ./tradingagents
 COPY cli ./cli
 COPY web/*.py ./web/
+COPY web/portfolio ./web/portfolio
 RUN pip install --no-cache-dir '.[search]'
+RUN python -c "import web.server"
 COPY --from=ui /src/web/client/dist ./web/client/dist
 RUN test -s web/client/dist/index.html && \
     groupadd --gid 10001 web && \
