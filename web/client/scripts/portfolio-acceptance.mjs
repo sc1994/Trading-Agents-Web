@@ -122,6 +122,8 @@ try {
         updated_at: date,
       },
     ];
+    let catalogScenario = "normal";
+    let catalogPolls = 0;
     let settings = { automatic: true, concentration_limit: "40" };
     let results = [
       {
@@ -234,6 +236,57 @@ try {
       }
       if (endpoint === "/instruments/search") {
         const q = url.searchParams.get("q") ?? "";
+        if (catalogScenario !== "normal") {
+          const loading = catalogScenario === "loading" && catalogPolls++ === 0;
+          const expired = catalogScenario === "expired";
+          const stale = catalogScenario === "stale";
+          return json({
+            results: instruments
+              .filter((i) => i.symbol.includes(q) || i.name.includes(q))
+              .map((i) => ({
+                ...i,
+                supported: !loading && !expired,
+                support_code: loading
+                  ? "catalog_loading"
+                  : expired
+                    ? "catalog_unavailable"
+                    : null,
+                catalog_state: stale ? "stale" : "fresh",
+                catalog_fetched_at: "2026-09-28T08:00:00Z",
+              })),
+            unavailable: loading || expired,
+            catalog_status: [
+              {
+                exchange: "SH",
+                state: loading
+                  ? "loading"
+                  : expired
+                    ? "expired"
+                    : stale
+                      ? "stale"
+                      : "fresh",
+                fetched_at: loading ? null : "2026-09-28T08:00:00Z",
+                refreshing: loading,
+                error_code:
+                  loading || (!stale && !expired) ? null : "market_timeout",
+              },
+              {
+                exchange: "SZ",
+                state: "fresh",
+                fetched_at: `${date}T08:00:00Z`,
+                refreshing: false,
+                error_code: null,
+              },
+              {
+                exchange: "BJ",
+                state: "unavailable",
+                fetched_at: null,
+                refreshing: false,
+                error_code: "market_timeout",
+              },
+            ],
+          });
+        }
         return json({
           results: q.toUpperCase().includes("NVDA")
             ? [
@@ -396,6 +449,40 @@ try {
       path: path.join(output, `IMPLEMENTED-portfolio-watchlist-${device}.png`),
       fullPage: true,
     });
+    for (const scenario of ["loading", "expired"]) {
+      catalogScenario = scenario;
+      catalogPolls = 0;
+      await page
+        .getByRole("button", { name: /添加自选/ })
+        .first()
+        .click();
+      const modal = page.getByRole("dialog", { name: "添加自选股" });
+      await modal.getByRole("combobox").fill("600000");
+      if (scenario === "loading") {
+        await expect(page.getByText(/沪市：首次加载名录/)).toBeVisible();
+        await expect(
+          page
+            .locator(".ant-select-item-option")
+            .filter({ hasText: "示例股份" }),
+        ).not.toHaveClass(/disabled/);
+        await page
+          .locator(".ant-select-item-option")
+          .filter({ hasText: "示例股份" })
+          .click();
+        await expect(modal.getByRole("combobox")).toHaveValue(
+          "示例股份 · 600000.SS",
+        );
+      } else {
+        await expect(page.getByText(/沪市：名录已超过 7 天/)).toBeVisible();
+        await expect(
+          page
+            .locator(".ant-select-item-option")
+            .filter({ hasText: "示例股份" }),
+        ).toHaveClass(/disabled/);
+      }
+      await modal.getByRole("button", { name: /^取\s*消$/ }).click();
+    }
+    catalogScenario = "stale";
     await page
       .getByRole("button", { name: /添加自选/ })
       .first()
@@ -407,7 +494,18 @@ try {
       .filter({ hasText: "示例股份" })
       .click();
     await watch.getByLabel("关注理由").fill("新加入的演示关注理由");
+    await expect(page.getByText(/沪市：使用 2026-09-28 名录/)).toBeVisible();
+    await expect(page.getByText(/北交所：名录更新失败/)).toBeVisible();
+    await fit();
+    await page.screenshot({
+      path: path.join(
+        output,
+        `IMPLEMENTED-portfolio-catalog-cache-${device}.png`,
+      ),
+      fullPage: false,
+    });
     await watch.getByRole("button", { name: /^保\s*存$/ }).click();
+    catalogScenario = "normal";
     await expect(
       page.locator("#main").getByText("新加入的演示关注理由"),
     ).toBeVisible();
@@ -437,7 +535,7 @@ try {
     await fit();
     expect(errors).toEqual([]);
     console.log(
-      `${device}: portfolio CRUD, non-A-share rejection, partial checks, prefill and layout passed`,
+      `${device}: portfolio CRUD, non-A-share rejection, partial checks, catalog loading/cache/expiry, prefill and layout passed`,
     );
     await context.close();
   }

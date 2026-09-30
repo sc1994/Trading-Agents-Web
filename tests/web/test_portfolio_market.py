@@ -2,6 +2,7 @@ import json
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 from threading import Event
 from time import monotonic
 
@@ -11,8 +12,8 @@ from web.portfolio.domain import DomainError
 from web.portfolio.market import AShareMarket, BoundedFetch
 
 
-def catalog():
-    return {
+def catalog(exchange=None):
+    value = {
         "instruments": [
             {
                 "symbol": "600000.SS",
@@ -37,6 +38,13 @@ def catalog():
             },
         ]
     }
+    if exchange:
+        value["instruments"] = [i for i in value["instruments"] if i["exchange"] == exchange]
+    return value
+
+
+def catalog_call(operation, payload, timeout):
+    return catalog(payload["exchange"])
 
 
 def test_stale_close_is_not_a_valid_quote(tmp_path):
@@ -79,7 +87,8 @@ def test_malformed_quotes_cannot_be_used(tmp_path, changes):
 
 
 def test_identity_requires_catalog_not_prefix_guessing(tmp_path):
-    market = AShareMarket(tmp_path, call=lambda *args: catalog())
+    market = AShareMarket(tmp_path, call=catalog_call)
+    market.refresh_catalog()
     assert market.resolve("600000")["symbol"] == "600000.SS"
     assert market.resolve("920001.BJ")["exchange"] == "BJ"
     for symbol, code in [
@@ -92,14 +101,18 @@ def test_identity_requires_catalog_not_prefix_guessing(tmp_path):
 
 
 def test_partial_catalog_never_overwrites_complete_cache(tmp_path):
-    market = AShareMarket(tmp_path, call=lambda *args: catalog())
+    now = datetime.now(timezone.utc)
+    market = AShareMarket(tmp_path, call=catalog_call, clock=lambda: now)
+    market.refresh_catalog()
     market.resolve("600000")
-    path = tmp_path / "portfolio-market" / "catalog.json"
+    path = tmp_path / "portfolio-market" / "catalog-sh.json"
     before = path.read_bytes()
-    bad = AShareMarket(tmp_path, call=lambda *args: {"instruments": catalog()["instruments"][:1]})
-    with pytest.raises(DomainError, match="catalog_unavailable"):
-        bad.refresh_catalog()
+    bad = AShareMarket(
+        tmp_path, call=lambda *args: {"instruments": []}, clock=lambda: now + timedelta(days=2)
+    )
+    bad.refresh_catalog("SH")
     assert path.read_bytes() == before
+    assert bad.resolve("600000.SS")["catalog_state"] == "stale"
 
 
 def test_outage_does_not_silently_validate_new_identity(tmp_path):
@@ -125,7 +138,8 @@ def test_search_supports_verified_bj_and_rejects_non_a_share(tmp_path, monkeypat
             "unavailable": False,
         },
     )
-    market = AShareMarket(tmp_path, call=lambda *args: catalog())
+    market = AShareMarket(tmp_path, call=catalog_call)
+    market.refresh_catalog()
     assert market.search("920001")["results"][0]["supported"] is True
     result = market.search("NVDA")["results"][0]
     assert result["supported"] is False
