@@ -41,7 +41,9 @@ Files: `docs/domestic-news.md` and this checklist.
 - [x] Update source coverage/limitations documentation.
 - [x] Probe `0780.HK` for Sept17-24 and capture a public-source screenshot if browsing is used.
 - [x] Run full pytest, diff checks, and a read-only independent code review; address findings.
-- [ ] Commit, push and create a PR; report actual verification and limitations, without claiming deployment.
+- [x] Commit, push and create a PR; report actual verification and limitations, without claiming deployment.
+
+Delivery: https://github.com/sc1994/Trading-Agents-Web/pull/26 (not deployed).
 
 Verification: final suite 1114 passed, 2 skipped, 71 subtests; changed-file Ruff
 and git diff checks passed. Read-only review approved after a red/green test fixed
