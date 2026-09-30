@@ -47,7 +47,7 @@
 
 Plans carry `id`, `symbol`, `horizon`, `shares`, `cost`, `reason`, `lower`, `upper`, `review_date`, `cost_pending`, `revision`, `status`. Quotes carry `symbol`, `price_date`, `close`, `currency`, `source`, `fetched_at`, `error_code`. Results carry plan ID/revision/snapshot, quote, quality (`valid`, `missing`, `stale`, `cost_pending`), signals, state (`review`, `not_triggered`, `no_conditions`, `unavailable`), market_value and unrealized_pnl decimal strings or null.
 
-- [ ] Write failing boundary tests, including this equality case:
+- [x] Write failing boundary tests, including this equality case:
 
 ```python
 from web.portfolio.domain import evaluate
@@ -66,10 +66,10 @@ def test_lower_equality_triggers_review():
     assert result["unrealized_pnl"] == "-200"
 ```
 
-- [ ] Run `pytest tests/web/test_portfolio_domain.py -q`; expect missing-module failure before implementation.
-- [ ] Implement `validate_plan` with allowed-field/type checks and `re.fullmatch(r"(?:0|[1-9][0-9]{0,11})(?:\.[0-9]{1,6})?", value)` plus Decimal positivity. Apply `close <= lower`, `close >= upper`, and target-date comparison. Invalid/stale quotes cannot produce price signals; a valid date signal can coexist with unavailable price quality. Use Decimal quantization/string normalization, not float conversion.
-- [ ] Add tests for upper equality, date-only review, no conditions, invalid currency/symbol/date, nonfinite and exponent inputs, plan limits, pending cost, mixed quality, identical-stock grouping and revision mismatch suppression. Aggregation requires a matching valid result for every active plan and excludes no missing plan silently.
-- [ ] Run the entire domain file, then commit `feat: add validated portfolio plans and observation rules`.
+- [x] Run `pytest tests/web/test_portfolio_domain.py -q`; expect missing-module failure before implementation.
+- [x] Implement `validate_plan` with allowed-field/type checks and `re.fullmatch(r"(?:0|[1-9][0-9]{0,11})(?:\.[0-9]{1,6})?", value)` plus Decimal positivity. Apply `close <= lower`, `close >= upper`, and target-date comparison. Invalid/stale quotes cannot produce price signals; a valid date signal can coexist with unavailable price quality. Use Decimal quantization/string normalization, not float conversion.
+- [x] Add tests for upper equality, date-only review, no conditions, invalid currency/symbol/date, nonfinite and exponent inputs, plan limits, pending cost, mixed quality, identical-stock grouping and revision mismatch suppression. Aggregation requires a matching valid result for every active plan and excludes no missing plan silently.
+- [x] Run the entire domain file, then commit `feat: add validated portfolio plans and observation rules`.
 
 ## Task 2: Portfolio Persistence and Durable Snapshots
 
