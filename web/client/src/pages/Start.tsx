@@ -30,6 +30,7 @@ import {
   modelDefaults,
   providerOptions,
 } from "../configuration";
+import type { ResearchPrefill } from "../portfolio/api";
 
 const today = () => {
   const date = new Date();
@@ -44,9 +45,11 @@ interface StartValues extends TaskParams {
 export function Start({
   api,
   navigate,
+  prefill,
 }: {
   api: WebApi;
   navigate: (path: string) => void;
+  prefill?: ResearchPrefill;
 }) {
   const [form] = Form.useForm<StartValues>();
   const [settings, setSettings] = useState<SettingsView>();
@@ -74,7 +77,7 @@ export function Start({
       .then((value) => {
         if (!active) return;
         form.setFieldsValue({
-          date: today(),
+          date: prefill ? (prefill.date ?? "") : today(),
           depth: "standard",
           asset_type: "auto",
           language: value.language,
@@ -83,6 +86,20 @@ export function Start({
           deep_model: value.deep_model,
           checkpoint_enabled: value.checkpoint_enabled,
         });
+        if (prefill) {
+          form.setFieldValue("query", prefill.symbol);
+          setQuery(prefill.symbol);
+          setSelected({
+            symbol: prefill.symbol,
+            name: prefill.name,
+            exchange: prefill.symbol.endsWith(".SS")
+              ? "SH"
+              : prefill.symbol.endsWith(".BJ")
+                ? "BJ"
+                : "SZ",
+            type: "EQUITY",
+          });
+        }
         setSettings(value);
       })
       .catch(() => {
@@ -91,7 +108,7 @@ export function Start({
     return () => {
       active = false;
     };
-  }, [api, attempt, form]);
+  }, [api, attempt, form, prefill]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -169,6 +186,18 @@ export function Start({
 
   return (
     <>
+      {prefill && (
+        <Alert
+          className="portfolio-alert"
+          type="info"
+          showIcon
+          message={
+            prefill.date
+              ? "通用单股研究，未结合你的持仓条件。请确认分析日期与参数。"
+              : "尚无已核实收盘日期，请填写分析日期。研究未结合你的持仓条件。"
+          }
+        />
+      )}
       <div className="page-heading">
         <div>
           <h1>今天研究什么？</h1>

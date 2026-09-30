@@ -6,6 +6,26 @@ vi.mock("./api", async (original) => ({
   webApi: (await import("./test/fixtures")).fakeApi,
 }));
 beforeEach(resetApi);
+
+it("offers portfolio navigation without replacing analysis", () => {
+  window.history.replaceState({}, "", "/history");
+  render(<App />);
+  const navigation = within(
+    screen.getByRole("navigation", { name: "主要导航" }),
+  );
+  expect(navigation.getByRole("link", { name: /我的持仓/ })).toHaveAttribute(
+    "href",
+    "/holdings",
+  );
+  expect(navigation.getByRole("link", { name: /自选股/ })).toHaveAttribute(
+    "href",
+    "/watchlist",
+  );
+  expect(navigation.getByRole("link", { name: /发起分析/ })).toHaveAttribute(
+    "href",
+    "/",
+  );
+});
 it.each(["/history", "/history?view=reports"])(
   "announces exactly one current link per desktop and mobile navigation on %s",
   async (path) => {

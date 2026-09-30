@@ -183,6 +183,8 @@ def test_non_a_share_plan_rejected_without_mutation(portfolio_client):
 
 ## Task 6: Holdings, Watchlist and Explicit Research Handoff
 
+**Progress:** Complete; production build and all 65 frontend tests passed. Navigation preserves the existing analysis root; portfolio handoff requires user confirmation and a date when no verified close exists.
+
 **Files:** Create `web/client/src/portfolio/api.ts`, `InstrumentPicker.tsx`, `PlanForm.tsx`, their colocated tests, `pages/Holdings.tsx`, `pages/Watchlist.tsx`, page tests; modify `App.tsx`, `styles.css`, `pages/Start.tsx`, `pages/Start.test.tsx`, `App.test.tsx`.
 
 **Interfaces:** separate `PortfolioApi` mirrors Task 5 routes; `PlanInput` carries symbol/horizon/shares/cost/reason/lower/upper/review_date/cost_pending. `PlanForm({api, plan?, onSaved, onCancel})` preserves failed values and revision. `InstrumentPicker({api, value?, onChange})` rejects unsupported selections. `Holdings({api, navigate})` and `Watchlist({api, navigate})` consume the portfolio client separately from existing WebApi. `Start` accepts optional `{symbol,name,date}` prefill passed via React Router location state; missing verified date does not silently use an unverified portfolio date.
