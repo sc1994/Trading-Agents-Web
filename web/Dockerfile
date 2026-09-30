@@ -12,6 +12,7 @@ FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     TRADINGAGENTS_WEB_DATA_DIR=/var/lib/tradingagents-web \
+    PLAYWRIGHT_BROWSERS_PATH=/opt/playwright \
     XDG_CACHE_HOME=/var/lib/tradingagents-web/cache
 
 WORKDIR /app
@@ -21,6 +22,9 @@ COPY cli ./cli
 COPY web/*.py ./web/
 COPY web/portfolio ./web/portfolio
 RUN pip install --no-cache-dir '.[search]'
+RUN pip install --no-cache-dir '.[browser]' && \
+    python -m playwright install --with-deps chromium && \
+    chmod -R a+rX /opt/playwright
 RUN python -c "import web.server"
 COPY --from=ui /src/web/client/dist ./web/client/dist
 RUN test -s web/client/dist/index.html && \

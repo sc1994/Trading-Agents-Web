@@ -16,6 +16,7 @@ from tradingagents.agents.utils.agent_utils import (
     build_instrument_context,
     get_balance_sheet,
     get_cashflow,
+    get_china_market_news,
     get_fundamentals,
     get_global_news,
     get_income_statement,
@@ -233,6 +234,7 @@ class TradingAgentsGraph:
                     # News and insider information
                     get_news,
                     get_global_news,
+                    get_china_market_news,
                     get_insider_transactions,
                     get_macro_indicators,
                     get_prediction_markets,

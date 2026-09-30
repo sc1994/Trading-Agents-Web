@@ -119,6 +119,12 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # News / data fetching parameters
     # Increase for longer lookback strategies or to broaden macro coverage;
     # decrease to reduce token usage in agent prompts.
+    "china_news_enabled": True,           # auto-route mainland equities to domestic news
+    "china_news_browser_fallback": True,  # public pages only; requires [browser] + Chromium
+    "china_news_timeout": 10,             # seconds per HTTP request
+    "china_news_browser_timeout": 20,     # total seconds per browser attempt
+    "china_news_max_pages": 2,            # bounded retrieval, hard cap of 3
+    "china_news_cache_ttl": 300,          # per-process successful result cache, seconds
     "news_article_limit": 20,             # max articles per ticker (ticker-news)
     "global_news_article_limit": 10,      # max articles for global/macro news
     "global_news_lookback_days": 7,       # macro news lookback window
