@@ -77,7 +77,7 @@ def test_lower_equality_triggers_review():
 
 **Interfaces:** `PortfolioStore(store: web.store.Store)` initializes schema transactionally. Methods: `upsert_instrument(instrument: dict) -> dict`; `add_watch(symbol: str, reason: str) -> dict`; `update_watch(symbol: str, reason: str) -> dict`; `remove_watch(symbol: str) -> None`; `list_watchlist() -> list[dict]`; `create_plan(raw: dict) -> dict`; `update_plan(id: str, revision: int, raw: dict) -> dict`; `close_plan(id: str, revision: int) -> dict`; `list_plans(active_only: bool = True) -> list[dict]`; `get_settings() -> dict`; `update_settings(raw: dict) -> dict`; `enqueue(source: str, target_date: str | None, attempt: int = 0) -> dict`; `claim() -> dict | None`; `complete(id: str, results: list[dict], status: str) -> dict`; `fail(id: str, code: str) -> dict`; `get_check(id: str) -> dict | None`; `latest_check() -> dict | None`; `recover() -> None`; `automatic_attempts(target_date: str) -> list[dict]`.
 
-- [ ] Write a failing migration/persistence test:
+- [x] Write a failing migration/persistence test:
 
 ```python
 from web.store import Store
@@ -92,10 +92,10 @@ def test_portfolio_does_not_replace_existing_tasks(tmp_path):
     assert portfolio.get_settings() == {"automatic": True, "concentration_limit": None}
 ```
 
-- [ ] Run `pytest tests/web/test_portfolio_store.py -q`; verify the new import fails.
-- [ ] Add tables from the spec using the existing Store transaction context, foreign keys, UUID IDs, decimal text and schema idempotence. Enforce a partial unique index for a single queued/running check and `(target_date, attempt)` uniqueness for automatic checks. `claim` snapshots active plans in the same short transaction. `complete` atomically saves immutable snapshots/results and the terminal status.
-- [ ] Test same-stock multiple horizons; watch deletion independence; revision conflict and close guards; inactive plans; 100-stock union limit under concurrent writes; idempotent enqueue; recovery of running rows; no calls to external services within transactions; reopening the database preserves historical results after plan changes.
-- [ ] Run store/domain tests and existing `tests/web/test_store.py`; commit `feat: persist portfolio plans and close-check history`.
+- [x] Run `pytest tests/web/test_portfolio_store.py -q`; verify the new import fails.
+- [x] Add tables from the spec using the existing Store transaction context, foreign keys, UUID IDs, decimal text and schema idempotence. Enforce a partial unique index for a single queued/running check and `(target_date, attempt)` uniqueness for automatic checks. `claim` snapshots active plans in the same short transaction. `complete` atomically saves immutable snapshots/results and the terminal status.
+- [x] Test same-stock multiple horizons; watch deletion independence; revision conflict and close guards; inactive plans; 100-stock union limit under concurrent writes; idempotent enqueue; recovery of running rows; no calls to external services within transactions; reopening the database preserves historical results after plan changes.
+- [x] Run store/domain tests and existing `tests/web/test_store.py`; commit `feat: persist portfolio plans and close-check history`.
 
 ## Task 3: Verified A-Share Market Data with Bounded Calls
 
