@@ -1,10 +1,13 @@
 import { ConfigProvider, Empty, Button, Tooltip } from "antd";
+import { useEffect, useState } from "react";
 import zhCN from "antd/locale/zh_CN";
 import {
   FileTextOutlined,
   HistoryOutlined,
   PlusOutlined,
   SettingOutlined,
+  FundOutlined,
+  StarOutlined,
 } from "@ant-design/icons";
 import {
   BrowserRouter,
@@ -21,8 +24,18 @@ import { Settings } from "./pages/Settings";
 import { Run } from "./pages/Run";
 import { Report } from "./pages/Report";
 import { History } from "./pages/History";
+import { Holdings } from "./pages/Holdings";
+import { Watchlist } from "./pages/Watchlist";
+import { portfolioApi, type ResearchPrefill } from "./portfolio/api";
 
 const navigation = [
+  {
+    to: "/holdings",
+    label: "我的持仓",
+    mobile: "持仓",
+    icon: <FundOutlined />,
+  },
+  { to: "/watchlist", label: "自选股", mobile: "自选", icon: <StarOutlined /> },
   { to: "/", label: "发起分析", mobile: "分析", icon: <PlusOutlined /> },
   {
     to: "/history",
@@ -52,6 +65,8 @@ function TaskPage({ report = false }: { report?: boolean }) {
 function Workbench() {
   const navigate = useNavigate();
   const location = useLocation();
+  const researchNavigate = (path: string, prefill?: ResearchPrefill) =>
+    navigate(path, { state: prefill ? { prefill } : null });
   const activePath = location.pathname + location.search;
   const activeNav = location.pathname.startsWith("/tasks/")
     ? "/history"
@@ -115,7 +130,25 @@ function Workbench() {
           <Routes>
             <Route
               path="/"
-              element={<Start api={webApi} navigate={navigate} />}
+              element={
+                <Start
+                  api={webApi}
+                  navigate={navigate}
+                  prefill={location.state?.prefill}
+                />
+              }
+            />
+            <Route
+              path="/holdings"
+              element={
+                <Holdings api={portfolioApi} navigate={researchNavigate} />
+              }
+            />
+            <Route
+              path="/watchlist"
+              element={
+                <Watchlist api={portfolioApi} navigate={researchNavigate} />
+              }
             />
             <Route path="/settings" element={<Settings api={webApi} />} />
             <Route
@@ -151,11 +184,21 @@ function Workbench() {
   );
 }
 export function App() {
+  const [reducedMotion, setReducedMotion] = useState(
+    () => window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+  );
+  useEffect(() => {
+    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const update = () => setReducedMotion(media.matches);
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
   return (
     <ConfigProvider
       locale={zhCN}
       theme={{
         token: {
+          motion: !reducedMotion,
           colorPrimary: "#1f7a55",
           colorSuccess: "#1f7a55",
           colorText: "#162b35",

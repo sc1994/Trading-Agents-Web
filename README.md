@@ -39,6 +39,35 @@ deliberately excludes Beijing listings until their Yahoo ticker support is verif
 AKShare's MIT software license does not grant rights to redistribute the upstream
 market data; review source terms before commercial deployment.
 
+### A-share holdings and watchlist
+
+The Holdings and Watchlist views use independent `/api/portfolio` endpoints and
+SQLite tables; they do not change the existing analysis task schema. Add verified
+Shanghai, Shenzhen or Beijing ordinary A-shares manually, then record shares, cost,
+investment horizon and optional price/review conditions. One stock can have separate
+short-, medium- and long-term plans. Other markets and security types are unsupported
+in these views. This release does not connect to Tonghuashun or a brokerage account.
+
+Checks use AKShare trading calendars and unadjusted closing prices. Optional automatic
+checks run after 16:30 Asia/Shanghai on verified trading days, with at most three
+attempts spaced 30 minutes apart; there is no historical backfill. Missing, stale or
+obsolete results suppress portfolio totals and concentration checks. A condition not
+triggering is not a safety assessment. Public data availability is not guaranteed and
+is not suitable for automated execution.
+
+Holdings are manual snapshots, not a transaction ledger. Maintain quantities and
+costs yourself, including corporate actions; mark a cost as pending to pause related
+calculations. P/L excludes fees, taxes and dividends. Concentration covers entered
+stocks only, not cash or other assets. Financial records and local market caches are
+private server data and belong in the same protected backup policy as credentials.
+Research handoff requires confirmation and remains generic single-stock research:
+the model does not receive these holdings, costs or investment horizons. Opportunity
+ranking, imports, external notifications and automatic trading are not included.
+
+For fixture-only desktop/mobile acceptance, build the client and run
+`node web/client/scripts/portfolio-acceptance.mjs`. It intercepts API calls, sends no
+orders or model requests, and saves fictitious screenshots in `docs/design/assets/`.
+
 ---
 
 <p align="center">

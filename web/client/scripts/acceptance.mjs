@@ -82,7 +82,7 @@ const settingsFixture = {
     fred: { configured: false, last4: null },
   },
 };
-let providers = [
+const initialProviders = [
   {
     id: "openai",
     name: "OpenAI",
@@ -98,6 +98,7 @@ let providers = [
     key: { configured: false, last4: null },
   },
 ];
+let providers = structuredClone(initialProviders);
 const currentSettings = () => ({ ...settingsFixture, providers });
 const history = [
   task,
@@ -140,6 +141,7 @@ try {
     ["desktop", { width: 1440, height: 1000 }],
     ["mobile", { width: 390, height: 844 }],
   ]) {
+    providers = structuredClone(initialProviders);
     const context = await browser.newContext({
       viewport,
       reducedMotion: "reduce",

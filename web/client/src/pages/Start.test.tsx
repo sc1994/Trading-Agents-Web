@@ -9,9 +9,49 @@ import {
 import userEvent from "@testing-library/user-event";
 import { ConfigProvider } from "antd";
 import { Start } from "./Start";
-import { customProviderId, fakeApi, navigate, resetApi, settings } from "../test/fixtures";
+import {
+  customProviderId,
+  fakeApi,
+  navigate,
+  resetApi,
+  settings,
+} from "../test/fixtures";
 
 beforeEach(resetApi);
+
+it("prefills verified portfolio research without submitting a task", async () => {
+  render(
+    <Start
+      api={fakeApi}
+      navigate={navigate}
+      prefill={{
+        symbol: "600000.SS",
+        name: "示例股份",
+        date: "2026-09-29",
+      }}
+    />,
+  );
+  const input = await screen.findByLabelText("股票 / 资产代码");
+  expect(input).toHaveValue("600000.SS");
+  expect(screen.getByLabelText("分析日期")).toHaveValue("2026-09-29");
+  expect(fakeApi.createTask).not.toHaveBeenCalled();
+});
+
+it("requires an explicit date when portfolio has no verified close", async () => {
+  render(
+    <Start
+      api={fakeApi}
+      navigate={navigate}
+      prefill={{
+        symbol: "600000.SS",
+        name: "示例股份",
+        date: null,
+      }}
+    />,
+  );
+  await screen.findByLabelText("股票 / 资产代码");
+  expect(screen.getByLabelText("分析日期")).toHaveValue("");
+});
 
 function renderStart() {
   return render(
@@ -96,7 +136,9 @@ it("submits selected symbol instead of the English search name, preserving serve
 
 it("searches a Chinese name and submits the selected market symbol", async () => {
   vi.mocked(fakeApi.searchSymbols).mockResolvedValue({
-    results: [{ symbol: "0780.HK", name: "同程旅行", exchange: "HKEX", type: "EQUITY" }],
+    results: [
+      { symbol: "0780.HK", name: "同程旅行", exchange: "HKEX", type: "EQUITY" },
+    ],
     unavailable: false,
   });
   render(<Start api={fakeApi} navigate={navigate} />);
@@ -105,9 +147,11 @@ it("searches a Chinese name and submits the selected market symbol", async () =>
   await userEvent.type(input, "同程");
   await userEvent.click(await screen.findByText("同程旅行"));
   await userEvent.click(screen.getByRole("button", { name: "开始分析" }));
-  await waitFor(() => expect(fakeApi.createTask).toHaveBeenCalledWith(
-    expect.objectContaining({ ticker: "0780.HK", name: "同程旅行" }),
-  ));
+  await waitFor(() =>
+    expect(fakeApi.createTask).toHaveBeenCalledWith(
+      expect.objectContaining({ ticker: "0780.HK", name: "同程旅行" }),
+    ),
+  );
 });
 
 it("debounces queries of at least two characters and aborts an obsolete request", async () => {
