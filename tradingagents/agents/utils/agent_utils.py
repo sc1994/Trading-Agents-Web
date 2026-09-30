@@ -17,6 +17,7 @@ from tradingagents.agents.utils.fundamental_data_tools import (
 from tradingagents.agents.utils.macro_data_tools import get_macro_indicators
 from tradingagents.agents.utils.market_data_validation_tools import get_verified_market_snapshot
 from tradingagents.agents.utils.news_data_tools import (
+    get_china_market_news,
     get_global_news,
     get_insider_transactions,
     get_news,
@@ -34,6 +35,7 @@ __all__ = [
     "get_cashflow",
     "get_income_statement",
     "get_news",
+    "get_china_market_news",
     "get_global_news",
     "get_insider_transactions",
     "get_macro_indicators",
@@ -226,6 +228,5 @@ def create_msg_delete():
         return {"messages": removal_operations + [placeholder]}
 
     return delete_messages
-
 
 

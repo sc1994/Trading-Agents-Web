@@ -11,6 +11,7 @@ from .alpha_vantage import (
     get_news as get_alpha_vantage_news,
     get_stock as get_alpha_vantage_stock,
 )
+from .china_news import get_china_market_news, get_china_stock_news
 from .config import get_config
 from .errors import (
     NoMarketDataError,
@@ -78,6 +79,7 @@ TOOLS_CATEGORIES = {
 }
 
 VENDOR_LIST = [
+    "china",
     "yfinance",
     "fred",
     "polymarket",
@@ -124,10 +126,12 @@ VENDOR_METHODS = {
     "get_news": {
         "alpha_vantage": get_alpha_vantage_news,
         "yfinance": get_news_yfinance,
+        "china": get_china_stock_news,
     },
     "get_global_news": {
         "yfinance": get_global_news_yfinance,
         "alpha_vantage": get_alpha_vantage_global_news,
+        "china": get_china_market_news,
     },
     "get_insider_transactions": {
         "alpha_vantage": get_alpha_vantage_insider_transactions,

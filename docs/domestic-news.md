@@ -1,0 +1,88 @@
+# Domestic News Sources
+
+Mainland equity news is routed to domestic sources by default. US and Hong Kong
+tickers retain the configured vendor. This changes news retrieval only, not
+prices, financial statements, trading or deployment.
+
+## Sources
+
+- Eastmoney: company-code news searches ordered by time. If announcements supply
+  a verified company name, it is also searched. Results can mention a company
+  incidentally; analysts must assess relevance.
+- CNINFO: company announcements with original PDF links. Returned securities are
+  checked against the requested code. PDF bodies are not automatically read;
+  reports explicitly identify metadata-only evidence and date-only timestamps.
+- Sina Finance and WallstreetCN: recent public market-news feeds.
+- CLS: public telegraph-page excerpts. Static parsing is attempted first; a
+  headless browser loads the public page when client-side rendering is needed.
+
+The A-share news analyst uses company news plus domestic market news. Its sentiment
+analyst assesses news/events, not community opinions. It does not request Reddit
+or StockTwits. With no dated company evidence, it abstains without generating a
+neutral score.
+
+## Browser Setup
+
+For a local Python installation:
+
+```bash
+pip install '.[browser]'
+python -m playwright install --with-deps chromium
+```
+
+The web Docker image installs the browser extra and Chromium, with binaries
+readable by its non-root runtime user. Existing containers need rebuilding; this
+change does not deploy or rebuild a running service.
+
+Each browser uses a fresh context, accepts no downloads, and only navigates to a
+fixed list of public news sites. It never supplies account cookies, logs in,
+solves CAPTCHAs, uses stealth plugins or bypasses paywalls. If a page is blocked
+or changes structure, that source is reported unavailable. Only already-public
+CLS excerpts may be expanded.
+
+## Configuration
+
+The existing Python config accepts these keys:
+
+| Key | Default | Purpose |
+| --- | --- | --- |
+| `china_news_enabled` | `True` | Automatic mainland-equity routing; `False` restores configured vendors |
+| `china_news_browser_fallback` | `True` | Enable public-browser fallback and CLS enrichment |
+| `china_news_timeout` | `10` | HTTP timeout in seconds per request |
+| `china_news_browser_timeout` | `20` | Browser-attempt budget in seconds, capped at 60 |
+| `china_news_max_pages` | `2` | Pages per API query, hard cap of 3 |
+| `china_news_cache_ttl` | `300` | Successful-report cache lifetime in seconds per process |
+
+`news_article_limit` and `global_news_article_limit` cap returned articles.
+The `china` vendor is also registered for `get_news` and `get_global_news` for
+explicit configuration. Do not select it globally for mixed-market stock runs;
+automatic mainland routing is preferable.
+
+All items require dates and original links. Filtering uses Asia/Shanghai calendar
+days, with an exclusive midnight-after upper bound. Reports disclose source
+failures, page caps and incomplete historical coverage. Public feeds are not
+historical archives; current articles cannot be substituted into an older run.
+Deduplication uses normalized title and publication date, within each report.
+
+## Verification
+
+```bash
+python -m pytest tests/test_china_news.py
+```
+
+Live smoke check (requires network; no LLM credentials):
+
+```python
+from datetime import datetime
+from zoneinfo import ZoneInfo
+from tradingagents.agents.utils.news_data_tools import get_news, get_china_market_news
+
+today = datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d")
+print(get_news.func("600519.SS", today, today))
+print(get_china_market_news.func(today, 1, 10))
+```
+
+Public access is not a commercial redistribution license or an uptime guarantee.
+Confirm site terms, automated-access rules and model-processing/display rights
+before production use. Tushare, paid news and authenticated communities are not
+integrated by this change.
