@@ -12,6 +12,7 @@ import {
 } from "antd";
 import type { TaskFilters, TaskView, WebApi } from "../api";
 import { ratingLabel, Status, statusLabel } from "../components/TaskContent";
+import { ReportGroups } from "../components/ReportGroups";
 
 export function History({
   api,
@@ -43,7 +44,11 @@ export function History({
     setError(false);
     const timer = setTimeout(() => {
       api
-        .listTasks({ q, status, rating })
+        .listTasks({
+          q: reportsOnly ? "" : q,
+          status: reportsOnly ? "completed" : status,
+          rating: reportsOnly ? undefined : rating,
+        })
         .then((result) => {
           if (active) setTasks(result.tasks);
         })
@@ -58,7 +63,7 @@ export function History({
       active = false;
       clearTimeout(timer);
     };
-  }, [api, q, status, rating, attempt]);
+  }, [api, q, status, rating, attempt, reportsOnly]);
   async function action(task: TaskView, kind: "resume" | "rerun" | "delete") {
     setBusy(true);
     setActionError(false);
@@ -84,14 +89,18 @@ export function History({
       <div className="page-heading">
         <div>
           <h1>{reportsOnly ? "决策报告" : "任务记录"}</h1>
-          <p>回看研究结果、恢复中断任务，或使用原参数再次分析。</p>
+          {!reportsOnly && (
+            <p>回看研究结果、恢复中断任务，或使用原参数再次分析。</p>
+          )}
         </div>
         <Button type="primary" onClick={() => navigate("/")}>
           新建分析
         </Button>
       </div>
       <Card className="history-card">
-        <div className="history-filters">
+        <div
+          className={`history-filters${reportsOnly ? " report-filters" : ""}`}
+        >
           <Input
             aria-label="代码或英文名称"
             placeholder="搜索股票代码或英文名称"
@@ -99,20 +108,22 @@ export function History({
             onChange={(event) => setQ(event.target.value)}
             allowClear
           />
-          <Select
-            aria-label="状态筛选"
-            value={status || ""}
-            onChange={(value) =>
-              setStatus((value || undefined) as TaskFilters["status"])
-            }
-            options={[
-              { value: "", label: "全部状态" },
-              ...Object.entries(statusLabel).map(([value, label]) => ({
-                value,
-                label,
-              })),
-            ]}
-          />
+          {!reportsOnly && (
+            <Select
+              aria-label="状态筛选"
+              value={status || ""}
+              onChange={(value) =>
+                setStatus((value || undefined) as TaskFilters["status"])
+              }
+              options={[
+                { value: "", label: "全部状态" },
+                ...Object.entries(statusLabel).map(([value, label]) => ({
+                  value,
+                  label,
+                })),
+              ]}
+            />
+          )}
           <Select
             aria-label="评级筛选"
             value={rating || ""}
@@ -165,7 +176,17 @@ export function History({
           <Spin aria-label="正在加载任务记录" />
         ) : (
           !error &&
-          (tasks.length ? (
+          (reportsOnly ? (
+            <ReportGroups
+              tasks={tasks}
+              rating={rating}
+              query={q}
+              navigate={navigate}
+              busy={busy}
+              rerun={(task) => action(task, "rerun")}
+              remove={setDeleting}
+            />
+          ) : tasks.length ? (
             <>
               <div className="history-row history-head" aria-hidden="true">
                 <span>标的</span>

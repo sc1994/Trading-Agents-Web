@@ -38,7 +38,9 @@ it.each(["/history", "/history?view=reports"])(
       expect(current).toHaveLength(1);
       expect(current[0]).toHaveAttribute("href", path);
     }
-    await screen.findByText("暂无匹配的任务");
+    await screen.findByText(
+      path.includes("view=reports") ? "暂无匹配的报告" : "暂无匹配的任务",
+    );
     expect(fakeApi.listTasks).toHaveBeenCalled();
   },
 );
