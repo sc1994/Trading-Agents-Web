@@ -157,6 +157,8 @@ def test_before_cutoff_uses_previous_completed_session():
 
 ## Task 5: Portfolio HTTP Contracts and Lifespan Wiring
 
+**Progress:** Complete; 291 Web tests passed, including strict portfolio APIs and existing analysis regression tests.
+
 **Files:** Create `web/portfolio/api.py`, `tests/web/test_portfolio_api.py`; modify `web/server.py`, `tests/web/conftest.py`.
 
 **Interfaces:** router prefix `/api/portfolio`; request models use `extra="forbid"` and strict fields. Routes: GET instruments/search; GET/POST watchlist; PATCH/DELETE watchlist/{symbol}; GET/POST plans; PATCH plans/{id}; POST plans/{id}/close (revision body); GET/PATCH settings; POST checks; GET checks/latest; GET checks/{id}; GET overview. Responses expose the dictionary fields from Tasks 1-4, structured errors `{code, field}`, and overview `{plans, latest_check, summary, reports, reference_date}`. `reports` are completed generic reports grouped by canonical symbol, ordered by analysis date then completion time; `reference_date` is verified or null.

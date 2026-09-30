@@ -12,6 +12,10 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 
 from web.api import router
+from web.portfolio.api import router as portfolio_router
+from web.portfolio.market import AShareMarket
+from web.portfolio.store import PortfolioStore
+from web.portfolio.worker import CloseCheckWorker
 from web.runner import GraphRunner
 from web.settings import SettingsService
 from web.store import Store
@@ -21,7 +25,8 @@ STATIC_DIR = Path(__file__).parent / "client" / "dist"
 _FALLBACK_INDEX = Path(__file__).with_name("index.html")
 
 
-def create_app(data_dir: Path | None = None, executor: GraphRunner | None = None) -> FastAPI:
+def create_app(data_dir: Path | None = None, executor: GraphRunner | None = None,
+               portfolio_market=None, portfolio_clock=None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app):
         directory = Path(
@@ -31,15 +36,23 @@ def create_app(data_dir: Path | None = None, executor: GraphRunner | None = None
         settings = SettingsService(store)
         runner = executor if executor is not None else GraphRunner(settings, directory)
         worker = TaskWorker(store, runner)
+        portfolio = PortfolioStore(store)
+        market = portfolio_market if portfolio_market is not None else AShareMarket(directory)
+        close_worker = CloseCheckWorker(portfolio, market, clock=portfolio_clock)
         app.state.data_dir = directory
         app.state.store = store
         app.state.settings = settings
         app.state.runner = runner
         app.state.worker = worker
+        app.state.portfolio = portfolio
+        app.state.portfolio_market = market
+        app.state.portfolio_worker = close_worker
         await run_in_threadpool(worker.start)
         try:
+            await run_in_threadpool(close_worker.start)
             yield
         finally:
+            await run_in_threadpool(close_worker.stop)
             await run_in_threadpool(worker.stop)
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
@@ -78,6 +91,7 @@ def create_app(data_dir: Path | None = None, executor: GraphRunner | None = None
         return PlainTextResponse("ok\n")
 
     app.include_router(router)
+    app.include_router(portfolio_router)
 
     @app.api_route("/{path:path}", methods=["GET", "HEAD"])
     def static_app(path: str):
@@ -90,7 +104,7 @@ def create_app(data_dir: Path | None = None, executor: GraphRunner | None = None
             if re.search(r"-[A-Za-z0-9_-]{8,}\.[^.]+$", candidate.name):
                 headers["Cache-Control"] = "public, max-age=31536000, immutable"
             return FileResponse(candidate, headers=headers)
-        if path not in {"", "index.html", "history", "settings", "tasks"} and not (
+        if path not in {"", "index.html", "history", "settings", "tasks", "holdings", "watchlist"} and not (
             path.startswith(("tasks/", "reports/"))
             and all(part not in {"", ".", ".."} for part in path.split("/"))
         ):
