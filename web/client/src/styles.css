@@ -1073,6 +1073,125 @@ h1 {
 .history-rating {
   font-weight: 600;
 }
+.report-filters {
+  grid-template-columns: minmax(0, 2fr) minmax(130px, 1fr) auto;
+}
+.history-card {
+  container: report-list / inline-size;
+}
+.report-group {
+  border-bottom: 1px solid #e3eae7;
+}
+.report-group:last-child {
+  border-bottom: 0;
+}
+.report-group-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 1.2fr) minmax(190px, 1.2fr) minmax(
+      110px,
+      0.8fr
+    ) 90px minmax(200px, 1.3fr);
+  align-items: center;
+  gap: 16px;
+  padding: 18px 0;
+}
+.report-latest-date,
+.report-rating,
+.report-version-time {
+  display: grid;
+  gap: 6px;
+  overflow-wrap: anywhere;
+}
+.report-latest-date .muted,
+.report-rating .muted,
+.report-version-time .muted {
+  font-size: 12px;
+}
+.report-versions {
+  padding: 0 16px 8px;
+  margin-bottom: 16px;
+  background: #f6f9f7;
+  border-left: 2px solid #d4e3db;
+}
+.report-version-row {
+  display: grid;
+  grid-template-columns: minmax(170px, 1.4fr) minmax(110px, 1fr) minmax(
+      70px,
+      0.7fr
+    ) minmax(140px, 1fr);
+  align-items: center;
+  gap: 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid #e3eae7;
+  font-size: 13px;
+}
+.report-version-row:last-child {
+  border-bottom: 0;
+}
+.report-version-head {
+  color: #647780;
+}
+.mobile-label {
+  display: none;
+}
+@container report-list (max-width: 850px) {
+  .report-group-row {
+    grid-template-columns: minmax(140px, 1fr) minmax(180px, 1.2fr) minmax(
+        100px,
+        1fr
+      ) 90px;
+  }
+  .report-group-actions {
+    grid-column: 1 / -1;
+  }
+  .report-group-row.history-head > :last-child {
+    display: none;
+  }
+}
+@container report-list (max-width: 650px) {
+  .report-group-row.history-head {
+    display: none;
+  }
+  .report-filters {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .report-group-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 14px;
+  }
+  .report-latest-date {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+  .report-rating {
+    grid-column: 1;
+    grid-row: 3;
+  }
+  .report-group-row > .ant-btn {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .report-version-head {
+    display: none;
+  }
+  .report-version-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+  }
+  .report-version-date {
+    grid-column: 1;
+    grid-row: 2;
+  }
+  .report-version-actions {
+    grid-column: 1 / -1;
+  }
+  .mobile-label {
+    display: inline;
+  }
+  .report-versions {
+    padding-inline: 12px;
+  }
+}
 @media (max-width: 1100px) {
   .run-layout {
     grid-template-columns: minmax(0, 1.6fr) minmax(220px, 1fr);
