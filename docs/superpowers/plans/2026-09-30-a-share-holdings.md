@@ -99,6 +99,8 @@ def test_portfolio_does_not_replace_existing_tasks(tmp_path):
 
 ## Task 3: Verified A-Share Market Data with Bounded Calls
 
+**Progress:** Complete; 27 market/search/catalog tests passed, installed AKShare signatures verified, and a bounded live calendar probe confirmed coverage through 2026-12-31.
+
 **Files:** Create `web/portfolio/market.py`, `web/portfolio/fetch.py`, `tests/web/test_portfolio_market.py`.
 
 **Interfaces:** `AShareMarket(data_dir: Path, call: Callable | None = None)`; `search(query: str) -> dict`; `resolve(symbol: str) -> dict`; `calendar() -> dict`; `quote(instrument: dict, target_date: str) -> dict`; `stop() -> None`. Calendar carries sorted ISO `dates`, `covered_from`, `covered_until`, `source`, `fetched_at`. Instrument carries canonical `symbol`, `name`, `exchange`, `currency="CNY"`, `security_type="A_SHARE"`, `verified_at`. `call(operation: str, payload: dict, timeout: float) -> dict` is the injectable fetch boundary.
