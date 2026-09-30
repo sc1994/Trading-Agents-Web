@@ -40,6 +40,13 @@ def test_missing_quote_preserves_date_signal_without_claiming_valid_prices():
     assert result["unrealized_pnl"] is None
 
 
+def test_explicit_fetch_failure_keeps_its_reason_without_becoming_stale():
+    result = evaluate(plan(), quote(price_date=None, close=None, error_code="market_timeout"),
+                      "2026-09-29")
+    assert result["quality"] == "missing"
+    assert result["error_code"] == "market_timeout"
+
+
 @pytest.mark.parametrize("changes", [
     {"price_date": "2026-09-28"}, {"symbol": "000001.SZ"}, {"currency": "USD"},
     {"close": "NaN"}, {"close": "0"}, {"close": "inf"}, {"error_code": "suspended"},

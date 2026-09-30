@@ -77,10 +77,13 @@ def evaluate(plan: dict, quote: dict | None, target_date: str) -> dict:
         quality, error = "cost_pending", "cost_pending"
     elif not quote:
         quality, error = "missing", "missing_quote"
+    elif quote.get("error_code"):
+        error = quote["error_code"]
+        quality = "stale" if error == "stale_quote" else "missing"
     elif quote.get("price_date") != target_date:
         quality, error = "stale", "stale_quote"
-    elif quote.get("error_code") or quote.get("symbol") != plan["symbol"] or quote.get("currency") != "CNY":
-        quality, error = "missing", quote.get("error_code") or "invalid_quote"
+    elif quote.get("symbol") != plan["symbol"] or quote.get("currency") != "CNY":
+        quality, error = "missing", "invalid_quote"
     else:
         try:
             positive_decimal(quote.get("close"), "close")
