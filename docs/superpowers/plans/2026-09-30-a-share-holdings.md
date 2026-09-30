@@ -129,6 +129,8 @@ def test_stale_close_is_not_a_valid_quote(tmp_path):
 
 ## Task 4: Independent End-of-Day Check Worker
 
+**Progress:** Complete; 65 portfolio domain/store/market/worker tests passed, including cutoff/weekend handling, retry spacing, deduplication and restart recovery.
+
 **Files:** Create `web/portfolio/worker.py`, `tests/web/test_portfolio_worker.py`.
 
 **Interfaces:** `completed_date(now: datetime, calendar: dict) -> str` (raises DomainError on unverified coverage); `CloseCheckWorker(store: PortfolioStore, market: AShareMarket, clock: Callable[[], datetime] | None = None)`; `start()`, `stop()`, `request_check() -> dict`, `tick() -> None`. `tick` is deterministic and testable without starting a polling thread; `request_check` only enqueues and returns, with date resolution performed outside HTTP/DB transactions.
