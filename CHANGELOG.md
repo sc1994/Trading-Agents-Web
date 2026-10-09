@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Breaking changes within the 0.x line are called out explicitly.
 
+## [Unreleased]
+
+### Fixed
+
+- **Sentiment analyst abstained on holiday weeks.** The sentiment lookback was a
+  hard-coded 7 days, so an analysis right after a multi-day market holiday
+  (e.g. 300511.SZ on 2026-10-09, whose window covered the National Day golden
+  week plus two trading days with no coverage) returned `DATA_INSUFFICIENT` even
+  though every source was reachable. The analyst now widens its window
+  through `sentiment_window_fallback_days` (7 → 14 → 30 days by default) and
+  scores real evidence; a widened report discloses the actual window and
+  instructs the model to weight the most recent items. All markets abstain only
+  when no window contains dated evidence. The evidence-policy checkpoint
+  signature was bumped so old checkpoints cannot silently resume the previous
+  behavior.
+
 ## [0.4.0] — 2026-08-31
 
 Look-ahead and point-in-time fixes across the data and memory layers, clearer

@@ -26,14 +26,19 @@ prices, financial statements, trading or deployment.
 
 The A-share news analyst uses company news plus domestic market news. Its sentiment
 analyst assesses news/events, not community opinions. It does not request Reddit
-or StockTwits. With no dated company evidence, it abstains without generating a
-neutral score. HK/US sentiment retains available overseas communities and uses
-the combined company-news block. All markets abstain with `DATA_INSUFFICIENT`
-when no article/social records were retrieved. Chinese macro feeds are context,
-not company-sentiment evidence. Chinese news is not forum discussion: Xueqiu and
-Eastmoney Guba are not integrated. Independent source failures do not erase
-healthy company or global-news sources. New evidence policy/config changes
-invalidate older graph checkpoints, so they cannot silently resume old reports.
+or StockTwits. It scores only dated company evidence: when the primary lookback
+window returns none, the window widens through `sentiment_window_fallback_days`
+(7 → 14 → 30 days by default) before the analyst abstains, so a multi-day market
+holiday does not by itself produce an abstention; a widened report discloses the
+actual window and instructs the analyst to weight the most recent items. HK/US
+sentiment retains available overseas communities and uses the combined
+company-news block; social sources stay on the primary window. All markets
+abstain with `DATA_INSUFFICIENT` when no article/social records were retrieved in
+any window. Chinese macro feeds are context, not company-sentiment evidence.
+Chinese news is not forum discussion: Xueqiu and Eastmoney Guba are not
+integrated. Independent source failures do not erase healthy company or
+global-news sources. New evidence policy/config changes invalidate older graph
+checkpoints, so they cannot silently resume old reports.
 
 ## Browser Setup
 
@@ -66,6 +71,8 @@ The existing Python config accepts these keys:
 | `china_news_browser_timeout` | `20` | Browser-attempt budget in seconds, capped at 60 |
 | `china_news_max_pages` | `2` | Pages per API query, hard cap of 3 |
 | `china_news_cache_ttl` | `300` | Successful-report cache lifetime in seconds per process |
+| `sentiment_window_days` | `7` | Primary sentiment lookback window in days |
+| `sentiment_window_fallback_days` | `[14, 30]` | Progressive fallback windows used when the primary window has no dated company evidence; entries must exceed the primary window and are capped at 365 days |
 
 `news_article_limit` and `global_news_article_limit` cap returned articles.
 The `china` vendor is also registered for `get_news` and `get_global_news` for
