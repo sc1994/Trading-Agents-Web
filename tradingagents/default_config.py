@@ -128,6 +128,12 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "news_article_limit": 20,             # max articles per ticker (ticker-news)
     "global_news_article_limit": 10,      # max articles for global/macro news
     "global_news_lookback_days": 7,       # macro news lookback window
+    # Sentiment analyst lookback. The primary window can be legitimately empty
+    # while every source is reachable (e.g. the week after a multi-day market
+    # holiday), so the window widens through the fallback list before the
+    # analyst abstains with DATA_INSUFFICIENT.
+    "sentiment_window_days": 7,               # primary sentiment lookback window
+    "sentiment_window_fallback_days": [14, 30],  # progressive fallbacks when the primary window has no evidence
     # Search queries used by get_global_news for macro headlines. Extend or
     # replace to broaden geographic / sector coverage.
     "global_news_queries": [

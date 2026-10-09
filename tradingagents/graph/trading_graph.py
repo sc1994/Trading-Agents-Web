@@ -402,8 +402,19 @@ class TradingAgentsGraph:
             f"risk={self.config['max_risk_discuss_rounds']}",
             f"asset={asset_type}",
             *([
-                "news_evidence=v2",
+                "news_evidence=v3",
                 f"china_news={self.config.get('china_news_enabled', True)}",
+                f"sentiment_window={self.config.get('sentiment_window_days', DEFAULT_CONFIG['sentiment_window_days'])}/"
+                + ",".join(
+                    str(day)
+                    for day in (
+                        self.config.get(
+                            "sentiment_window_fallback_days",
+                            DEFAULT_CONFIG["sentiment_window_fallback_days"],
+                        )
+                        or []
+                    )
+                ),
             ] if {"news", "social"}.intersection(self.selected_analysts) else []),
         ])
 

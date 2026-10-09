@@ -144,8 +144,14 @@ def test_news_policy_invalidates_old_checkpoint():
     graph.selected_analysts = ["news", "social"]
     graph.config = {"max_debate_rounds": 1, "max_risk_discuss_rounds": 1, "china_news_enabled": True}
     enabled = graph._run_signature("stock")
-    assert "news_evidence=v2" in enabled
+    assert "news_evidence=v3" in enabled
+    assert "sentiment_window=7/14,30" in enabled
     graph.config["china_news_enabled"] = False
+    assert enabled != graph._run_signature("stock")
+    graph.config = {
+        "max_debate_rounds": 1, "max_risk_discuss_rounds": 1, "china_news_enabled": True,
+        "sentiment_window_days": 7, "sentiment_window_fallback_days": [30],
+    }
     assert enabled != graph._run_signature("stock")
 
 
